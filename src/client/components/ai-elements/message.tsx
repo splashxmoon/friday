@@ -23,6 +23,7 @@ import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
 import { createContext, memo, useContext, useEffect, useState } from "react";
 import { Streamdown } from "streamdown";
 import { hasMath, mathText, mediaText, useKatex } from "../../AnswerParts.js";
+import { Guard } from "../../guard.js";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -318,16 +319,19 @@ export const MessageResponse = memo(
     const needs = !!math && typeof text === "string" && hasMath(text);
     const ready = useKatex(needs);
     if (needs && !ready) return null;
+    // Markdown that can't be drawn is shown as its plain words, the rest of the session as it was (guard.tsx).
     return (
-      <Streamdown
-        className={cn(
-          "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-          className
-        )}
-        {...props}
-      >
-        {text}
-      </Streamdown>
+      <Guard where="answer text" reset={text} fallback={() => <div className={cn("size-full whitespace-pre-wrap", className)}>{typeof text === "string" ? text : null}</div>}>
+        <Streamdown
+          className={cn(
+            "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+            className
+          )}
+          {...props}
+        >
+          {text}
+        </Streamdown>
+      </Guard>
     );
   },
   (prevProps, nextProps) => prevProps.children === nextProps.children

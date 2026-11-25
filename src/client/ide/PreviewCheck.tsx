@@ -82,7 +82,10 @@ function useBlobUrl(src: string): string | null {
       .catch(() => !gone && setUrl(src));
     return () => {
       gone = true;
-      if (made) URL.revokeObjectURL(made);
+      // Let go a while later, not at once: the video still holds the old address until the next draw (and a moment past its
+      // removal), and loading a revoked one logs "net::ERR_FILE_NOT_FOUND" in the console, about one preview check in three.
+      const old = made;
+      if (old) setTimeout(() => URL.revokeObjectURL(old), 10_000);
     };
   }, [src]);
   return url;

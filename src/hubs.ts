@@ -3,7 +3,7 @@ import type { LLM } from "./agent/llm.js";
 import type { Bus } from "./bus.js";
 import type { Plan } from "./workspace-types.js";
 import { gradeOf, runReceipt, type Learned } from "./route-learning.js";
-import { rankTools, type ToolOption } from "./routing.js";
+import { rankTools, type ToolOption, type ToolRank } from "./routing.js";
 import type { SessionCore } from "./session/core.js";
 import { runOf, type SessionState } from "./session/projection.js";
 import type { SessionStore } from "./session/store.js";
@@ -30,6 +30,30 @@ import { ENGINE_NAMES, MAIN_LANE, type EngineTool, type HubTask, type RepoCall, 
  */
 
 export const MAX_TASKS = 6;
+
+/** How close to the best tool's odds another's count as the same for a part: then the parts spread between them. */
+const PART_ODDS = 0.05;
+
+/**
+ * Each part's tool (Arun, 2026-11-25: "it is only selecting Codex"). The router's first pick used to be every part's, so a split ran
+ * all its parts on whichever tool read cheapest per correct result. Now, part by part in order: the tools that can take it and read
+ * about as likely as the best to get it right (within PART_ODDS), the one with the fewest parts so far first, ties in the router's
+ * order. So equally good tools share the work (and their limits), and a tool clearly likelier for a part still gets it. `only` (a
+ * Captain's tool set in its settings) is every part's.
+ */
+export function toolsForParts<T extends { tier: RouteTier }>(tasks: readonly T[], rank: (tier: RouteTier) => readonly Pick<ToolRank, "tool" | "success" | "out">[], fallback: EngineTool, only?: EngineTool): (T & { tool: EngineTool })[] {
+  if (only) return tasks.map((t) => ({ ...t, tool: only }));
+  const given = new Map<EngineTool, number>();
+  return tasks.map((t) => {
+    const ok = rank(t.tier).filter((r) => !r.out);
+    const top = ok[0];
+    const close = top ? ok.filter((r) => r === top || (r.success !== null && top.success !== null && r.success >= top.success - PART_ODDS)) : [];
+    const pick = close.reduce<(typeof close)[number] | undefined>((a, r) => (!a || (given.get(r.tool) ?? 0) < (given.get(a.tool) ?? 0) ? r : a), undefined);
+    const tool = pick?.tool ?? fallback;
+    given.set(tool, (given.get(tool) ?? 0) + 1);
+    return { ...t, tool };
+  });
+}
 export const MAX_LANES = SESSION_LANES;
 /** How many tasks a hub runs at once, by plan. Cheap in tokens for nobody: each is a copy of the folder, a process and a window spent. */
 const WIDTH: Partial<Record<Plan, number>> = { basic: 3, pro: 4, max: 4 };
@@ -175,8 +199,8 @@ export class Hubs {
     return { id: state.ownerId, name: state.members[state.ownerId]?.name ?? "" };
   }
 
-  /** Plan the work: a card for the session's owner to approve. */
-  async plan(sid: string, goal: string, by: { id: string; name: string }): Promise<HubResult> {
+  /** Plan the work: a card for the session's owner to approve. `only`: every task on that tool (a Captain's set in its settings). */
+  async plan(sid: string, goal: string, by: { id: string; name: string }, o: { only?: EngineTool } = {}): Promise<HubResult> {
     const text = goal.trim().slice(0, 4000);
     if (text.length < 8) return { ok: false, error: "Say what the hub should do." };
     const state = await this.deps.store.state(sid);
@@ -200,12 +224,9 @@ export class Hubs {
     if (!parsed.length) return { ok: false, error: "The planner didn't answer with tasks. Say the work in more detail and try again." };
     const ordered = orderTasks(parsed);
     if (!ordered) return { ok: false, error: "The planner's tasks wait on each other in a circle. Try again." };
-    // Each task's tool: the router's first pick for work of its kind on this machine, with what runs here have shown.
+    // Each task's tool: spread over the tools the router reads as about as likely to get it right, with what runs here have shown.
     const learned = state.workspaceId && this.deps.learned ? await this.deps.learned(state.workspaceId).catch(() => ({})) : {};
-    const tasks = ordered.map((t) => {
-      const top = rankTools(t.tier, tools, "", learned, { attended: false }).find((r) => !r.out);
-      return { ...t, tool: top?.tool ?? tools[0]!.tool };
-    });
+    const tasks = toolsForParts(ordered, (tier) => rankTools(tier, tools, "", learned, { attended: false }), tools[0]!.tool, o.only && tools.some((t) => t.tool === o.only) ? o.only : undefined);
     const plan = state.workspaceId ? await this.deps.plan(state.workspaceId).catch(() => "free" as Plan) : ("free" as Plan);
     const width = hubWidth(plan, state.lanes.length, tools);
     const id = randomBytes(5).toString("hex");
@@ -384,6 +405,12 @@ export class Hubs {
     const owner = this.ownerOf(state);
     const done = hub.tasks.filter((t) => hub.runs[t.id]?.status === "done");
     const missed = hub.tasks.filter((t) => hub.runs[t.id]?.status !== "done");
+    // A Captain's split: brought together in the session's own copy and left there, uncommitted, for the person to review and ship
+    // from the thread. A Captain never commits, pushes or opens a pull request (spec 14's guard).
+    if (state.options.byCaptain) {
+      await this.deps.store.append(sid, FRIDAY, { type: "hub.ended", id: hub.id, outcome: "done", ...(missed.length ? { why: `Left out, not done: ${missed.map((t) => t.title).join("; ")}.` } : {}), tasks: hub.tasks.length, done: done.length });
+      return;
+    }
     const message = `${hub.goal.split("\n")[0]!.slice(0, 72)}\n\nDone by a hub of ${done.length} agent${done.length === 1 ? "" : "s"} at once:\n${done.map((t) => `- ${t.title} (${ENGINE_NAMES[t.tool ?? "claude"]})`).join("\n")}${missed.length ? `\n\nLeft out, not done: ${missed.map((t) => t.title).join("; ")}.` : ""}`;
     let prUrl: string | undefined;
     let sha: string | undefined;

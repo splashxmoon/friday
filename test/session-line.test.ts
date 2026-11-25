@@ -21,7 +21,7 @@ test("the line says who is doing what, then how much waits on you", () => {
     [{ type: "run.started", causedBy: 2 }, 2000, "agent"],
     [{ type: "agent.message", text: "", toolCalls: [{ id: "c1", name: "edit_file", arguments: JSON.stringify({ path: "src/auth.ts", find: "a", content: "b" }) }] }, 3000, "agent"],
   );
-  assert.equal(stateLine(project("s", working), working, "Priya", t0 + 9000), "Friday Code is editing src/auth.ts");
+  assert.equal(stateLine(project("s", working), working, "Priya", t0 + 9000), "Friday Code is editing auth.ts");
 
   const asked = log(
     [{ type: "instruction", text: "Add the toggle.", interrupt: false }, 1000],

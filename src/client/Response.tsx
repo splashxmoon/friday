@@ -1,5 +1,6 @@
 import { stepKind } from "../run-strip.js";
 import { Fragment, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { tickEvery } from "./presence.js";
 import { Orb } from "@/components/aicss/Orb";
 import { currentTheme } from "./storage.js";
 import { ENGINE_NAMES, type EngineTool, type ToolCall } from "../types.js";
@@ -438,8 +439,8 @@ export function RunLog({
   useEffect(() => {
     if (!live) return;
     setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    // The page's one 1-second ticker, shared with every other clock and still while the window is hidden (presence.tsx).
+    return tickEvery(1000, setNow);
   }, [live]);
 
   const steps = groups.flatMap((g) => g.steps);
@@ -512,8 +513,8 @@ export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compa
   useEffect(() => {
     if (!live) return;
     setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    // The page's one 1-second ticker, shared with every other clock and still while the window is hidden (presence.tsx).
+    return tickEvery(1000, setNow);
   }, [live]);
   // A finished run under a second says no time at all: "Worked for 0s" read as nothing done (2026-10-27 design review).
   const took = startedAt ? (live ? now : (endedAt ?? now)) - startedAt : 0;

@@ -264,7 +264,7 @@ function lifeOf(seed: string): CSSProperties {
   return { "--blink-d": `${-(h % 70) / 10}s`, "--blink-t": `${5.5 + (h % 30) / 10}s` } as CSSProperties;
 }
 
-export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", breathing = false, letters, crowned = false, dozing = false }: { seed: string; size: number; eyes?: Eyes; breathing?: boolean; letters?: string; /** The lead: its crown is on its head, so nothing else is. */ crowned?: boolean; /** Asleep at rest: eyes shut until hovered (Teammates.tsx useDozing). */ dozing?: boolean }) {
+export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", breathing = false, letters, crowned = false, dozing = false, hat = false }: { seed: string; size: number; eyes?: Eyes; breathing?: boolean; letters?: string; /** The lead: its crown is on its head, so nothing else is. */ crowned?: boolean; /** Asleep at rest: eyes shut until hovered (Teammates.tsx useDozing). */ dozing?: boolean; /** A project Manager: its captain's hat, sat on its head (Managers.tsx). */ hat?: boolean }) {
   const look = lookOf(seed);
   const shape = shapeOf(seed);
   const fill = teamColour(seed);
@@ -273,9 +273,9 @@ export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", brea
   // chat), breathes as a whole by transform, which the compositor runs: eight agents at work had their outlines re-drawn on the
   // main thread every frame, in every place their faces showed (Arun, 2026-11-04: "look at app performance… a lot of agents").
   const morph = moving && size >= 40 && !look.box;
-  const extra = letters || (crowned && onTop(look.extra)) ? "none" : look.extra;
+  const extra = letters || ((crowned || hat) && onTop(look.extra)) ? "none" : look.extra;
   // Something on its head: the body a little smaller and lower, so all of it stays in the face's circle and its ring.
-  const top = onTop(extra);
+  const top = onTop(extra) || hat;
   return (
     // Its size inline: the places a face sits size their own icons' svgs (".rsp-avatar svg" and the like), never a face's.
     <svg className={`tm-face tm-blob${moving && !morph ? " tm-breathe" : ""}${dozing ? " tm-dozing" : ""}`} width={size} height={size} style={{ width: size, height: size, ...lifeOf(seed) }} viewBox="-50 -50 100 100" aria-hidden="true" focusable="false">
@@ -329,6 +329,7 @@ export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", brea
           </>
         )}
       </g>
+      {hat && <CaptainHat headTop={look.box ? Math.max(-30, 7 - 0.85 * (look.box.h / 2)) : -29} size={size} />}
     </svg>
   );
 });
@@ -339,5 +340,22 @@ export function Crown() {
     <svg className="tm-face-lead" viewBox="0 0 20 12" aria-hidden="true" focusable="false">
       <path d="M2 10.5V3.2l4.4 3.6L10 1.5l3.6 5.3L18 3.2v7.3Z" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+/**
+ * A project Manager's captain's hat (Arun, 2026-11-24: "B and place the cap more on the mascot s head"): navy crown, gold band and
+ * a white badge, its band on the top of the head and its black peak over the brow, never down to the eyes. In the face's own
+ * -50..50 space, so it sits on every body shape; the band's braid shows only where there's room to see it.
+ */
+function CaptainHat({ headTop: t, size }: { headTop: number; size: number }) {
+  return (
+    <g>
+      <path d={`M-29 ${t + 3}C-33 ${t - 13} -14 ${t - 18} 0 ${t - 18}C14 ${t - 18} 33 ${t - 13} 29 ${t + 3}Z`} fill="#1d2742" />
+      <rect x={-28} y={t} width={56} height={8} rx={2.5} fill="#e2ad3b" />
+      {size >= 22 && <path d={`M-24 ${t + 6}${Array.from({ length: 12 }, (_, i) => `l4 ${i % 2 ? 3 : -3}`).join("")}`} fill="none" stroke="#a87b1d" strokeWidth={1.4} />}
+      <circle cx={0} cy={t - 8} r={4.5} fill="#f6f5ef" />
+      <path d={`M-27 ${t + 8}C-14 ${t + 16} 14 ${t + 16} 27 ${t + 8}C18 ${t + 12} -18 ${t + 12} -27 ${t + 8}Z`} fill="#0d0d0d" />
+    </g>
   );
 }

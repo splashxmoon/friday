@@ -26,6 +26,8 @@ export interface AskInput {
    * so it reads and changes nothing. Without it, a scratch folder of Friday's own, as the agent builder needs nothing more.
    */
   cwd?: string;
+  /** Answered from its prompt alone: no tools, no MCP servers, Friday's words as its whole system prompt (TurnSpec.lean). */
+  lean?: boolean;
   /**
    * Folders it may read besides its cwd (a pull request's copy, pr-ide.ts): given as the tool's own extra-folder flag, and named in
    * the system note for a tool that has none. A folder it only reads is not its working folder, so the tool never loads that
@@ -36,14 +38,17 @@ export interface AskInput {
 
 /** onText hears the answer as the CLI writes it, a piece at a time; the whole answer is still what this returns. */
 export async function askCli(input: AskInput, onText?: (chunk: string) => void): Promise<{ text: string }> {
-  try {
-    return await askOnce(input, onText, []);
-  } catch (e) {
-    // An older version that doesn't know one of the newer flags (Adapter.optional, here --ephemeral or
-    // --no-session-persistence) is asked once more without it, as a session's turn is.
-    const flag = refusedFlag((e as Error).message, ADAPTERS[input.tool]?.optional ?? []);
-    if (!flag) throw e;
-    return askOnce(input, onText, [flag]);
+  // An older version that doesn't know one of the newer flags (Adapter.optional: --ephemeral, --no-session-persistence, a lean
+  // ask's --tools, --system-prompt, --strict-mcp-config) is asked again without it, as a session's turn is, one flag at a time.
+  const skip: string[] = [];
+  for (;;) {
+    try {
+      return await askOnce(input, onText, skip);
+    } catch (e) {
+      const flag = refusedFlag((e as Error).message, (ADAPTERS[input.tool]?.optional ?? []).filter((f) => !skip.includes(f)));
+      if (!flag) throw e;
+      skip.push(flag);
+    }
   }
 }
 
@@ -63,7 +68,7 @@ async function askOnce(input: AskInput, onText: ((chunk: string) => void) | unde
   // Never resumed, so never kept as a conversation of the tool's own (TurnSpec.ephemeral).
   const dirs = (input.dirs ?? []).filter(Boolean);
   const system = dirs.length && !adapter.dirs ? `${input.system}\n\nYou may read these folders too (read only): ${dirs.join(", ")}` : input.system;
-  const spec = { prompt, resumeId: null, mode: "plan" as const, system, ephemeral: true, ...(dirs.length ? { dirs } : {}), ...(skip.length ? { skip } : {}), ...(input.model ? { model: input.model } : {}) };
+  const spec = { prompt, resumeId: null, mode: "plan" as const, system, ephemeral: true, ...(input.lean && !input.cwd && !dirs.length ? { lean: true } : {}), ...(dirs.length ? { dirs } : {}), ...(skip.length ? { skip } : {}), ...(input.model ? { model: input.model } : {}) };
   const args = adapter.args(spec);
   // Cursor's answer streams as it is written (the adapter asks for that), and its own result line has it whole.
   const partial = input.tool === "cursor";

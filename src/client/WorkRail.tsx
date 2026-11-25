@@ -23,7 +23,7 @@ import { Icon, type IconName } from "./icons.js";
 import { barLine, runLine, useRunClock } from "./StatusBar.js";
 import { carriedOn } from "../limit-reset.js";
 import { relTime } from "./ui.js";
-import { PresenceRing, type Presence } from "./presence.js";
+import { PresenceRing, useNow, type Presence } from "./presence.js";
 import { DocView, ext, fileUrl, Gallery, LazyVideo, MARK, mediaFolders, name, openOutside, readAs, ReaderGuard, refreshWork, runOf, showFolder, sourcesIn, subDir, useTried, useWork, type WorkFile, type WorkList } from "./WorkPanels.js";
 import { dirOf, galleryOf, hubPieces, hubsIn, learnTitles, isSourcesFile, matchFile, mcpUsed, outputsOf, pieceTitle, plainLine, sameTitled, sentIn, shownIn, sourceCount, type Hub, type Shown, type Source } from "./work-outputs.js";
 import type { Send } from "./useSession.js";
@@ -238,6 +238,9 @@ type View = { kind: "file"; file: WorkFile } | { kind: "hub"; hub: Hub } | { kin
 
 export function WorkRail({ state, events, sid, invite, away, onBrowser, onBrowse, send }: { state: SessionState; events: SessionEvent[]; sid: string; invite: string; /** The side panel is open in its place. */ away: boolean; /** Opens the Browser panel. */ onBrowser: () => void; /** Opens a page in it. */ onBrowse: (url: string) => void; /** Says something to an agent (Progress's "Carry on"). */ send?: Send }) {
   const [open, setOpen] = useWorkRail();
+  // One clock for the whole rail: every "edited 2m ago", "updated now" and "3m" under it is drawn again every half minute, so
+  // they move as time does instead of staying what they were when the rail last drew (spec 13, "Where it sits still" 7).
+  useNow(30_000);
   const aside = useRef<HTMLElement>(null);
   // A Work session's header has no settings or side panel buttons: the rail is its side (style.css, html.work-session).
   useLayoutEffect(() => {

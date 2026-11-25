@@ -4,13 +4,16 @@
  * desktop app sets the opener once its window can be made (desktop.ts); a Friday run without a window (tests, `friday serve`)
  * has none, and opening says so.
  */
-let opener: ((sid: string) => boolean) | null = null;
+let opener: ((sid: string, invite?: string) => boolean) | null = null;
 
-export function setWindowOpener(f: ((sid: string) => boolean) | null): void {
+export function setWindowOpener(f: ((sid: string, invite?: string) => boolean) | null): void {
   opener = f;
 }
 
-/** Whether a window took it. */
-export function openInWindow(sid: string): boolean {
-  return opener ? opener(sid) : false;
+/**
+ * Whether a window took it. The invite is the way in for a thread the window hasn't opened before (one Slack started, made on
+ * this computer's server and in none of the page's lists): without it the page had nothing to open it with, and did nothing.
+ */
+export function openInWindow(sid: string, invite?: string): boolean {
+  return opener ? opener(sid, invite) : false;
 }

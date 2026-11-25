@@ -22,7 +22,8 @@ const WORDS: Record<PileId, { label: string; hint: (n?: number) => string; tone:
   leftover: { label: "Copies no session uses", hint: (n) => `${count(n, "folder")} from deleted sessions, removed agents or test runs. Clean up clears them; uncommitted work goes to the trash.`, tone: "#e0884a" },
   older: { label: "Older copies", hint: (n) => `${count(n, "folder")} no session here names, untouched for three days or more: made before Friday marked its copies, or by another Friday on this computer. Moved to the trash only when you say.`, tone: "#c97b3c" },
   spares: { label: "Spare copies", hint: (n) => `${count(n, "folder")} made ahead, so a new agent starts at once. Ones a closed app left are cleared.`, tone: "#9b7bd8" },
-  trash: { label: "Trash", hint: () => "Copies that had uncommitted work. Each waits a week, then is deleted.", tone: "#d85b6a" },
+  transcripts: { label: "Conversations of removed copies", hint: (n) => `${count(n, "folder")} Claude Code kept for copies Friday has removed, which can't be picked up again. Clean up moves them to the trash.`, tone: "#d0a05a" },
+  trash: { label: "Trash", hint: () => "Copies that had uncommitted work, and conversations of removed copies. Each waits a week, then is deleted.", tone: "#d85b6a" },
   cache: { label: "Browser cache", hint: () => "The Preview's pages and the app's own, held to 256 MB each.", tone: "#3fae8c" },
   index: { label: "Change tracking", hint: () => "What Friday reads to show an agent's changes. A folder's goes after two weeks unused.", tone: "#c2a03a" },
   shots: { label: "Screenshots", hint: () => "Pictures agents took in the browser. They go with their session.", tone: "#4fb0c6" },
@@ -30,7 +31,7 @@ const WORDS: Record<PileId, { label: string; hint: (n?: number) => string; tone:
   models: { label: "Voice models", hint: () => "The speech-to-text models voice input downloaded.", tone: "#b07a5a" },
   other: { label: "Settings and everything else", hint: () => "Your settings, uploads and keys, and any folder Friday didn't make in its copies folder (never touched).", tone: "#6b7280" },
 };
-const ORDER: PileId[] = ["copies", "leftover", "older", "spares", "trash", "cache", "index", "shots", "logs", "models", "other"];
+const ORDER: PileId[] = ["copies", "leftover", "older", "spares", "transcripts", "trash", "cache", "index", "shots", "logs", "models", "other"];
 
 function count(n: number | undefined, word: string) {
   return `${n ?? 0} ${word}${n === 1 ? "" : "s"}`;

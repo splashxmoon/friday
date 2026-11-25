@@ -2,6 +2,7 @@
 // (audit C-14: one agent read "Rio", "Friday Code · done", "Friday", "to agent" and "Test session" in five places).
 import { ENGINE_NAMES, MAIN_LANE, type SessionEvent } from "../types.js";
 import { givenName, type SessionState } from "../session/projection.js";
+import { logFold } from "./log-memo.js";
 
 /** The name an agent goes by in this session, for people: the one every view of it uses (Activity's agentNameFor). */
 export function agentDisplayName(state: SessionState, lane: string): string {
@@ -45,15 +46,18 @@ export function agentNameFor(state: SessionState, lane: string): string {
 const laneNamesSeen = new Map<string, string>();
 /** The names the log gives its lanes, as they were added and renamed: read once per log. */
 const namesRead = new WeakSet<readonly SessionEvent[]>();
+const namesFolded: Parameters<typeof logFold<number>>[0] = { current: null };
 export function laneNamesFrom(events: readonly SessionEvent[]): ReadonlyMap<string, string> {
   if (namesRead.has(events)) return laneNamesSeen;
   namesRead.add(events);
-  for (const e of events) {
+  // The same log grown: only what was added is read (log-memo.ts; spec 13, a long session read its whole log on every event).
+  logFold(namesFolded, events, () => 0, (n, e) => {
     const b = e.body;
     if (b.type === "lane.added" && b.lane.name) laneNamesSeen.set(b.lane.id, b.lane.agent?.name ?? b.lane.name);
     else if (b.type === "lane.renamed" && b.name) laneNamesSeen.set(b.laneId, b.name);
     else if (b.type === "crew.applied") for (const l of b.lanes) if (l.name) laneNamesSeen.set(l.id, l.agent?.name ?? l.name);
-  }
+    return n;
+  });
   return laneNamesSeen;
 }
 

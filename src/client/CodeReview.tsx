@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AutopilotButton, PilotTimeline, pilotWords, useAutopilot } from "./autopilot-ui.js";
 import type { PilotPrRecord } from "../autopilot.js";
 import type { BoardCard } from "../board.js";
@@ -20,14 +20,16 @@ import { refreshPrs, reviews, runReview, setAuto, useAuto, usePrs, useReviews } 
 import { ReviewTour } from "./ReviewTour.js";
 import { loadRecents, type Identity, type RecentSession } from "./storage.js";
 import { PrProof } from "./PrProof.js";
-import { ConfirmDialog, SkeletonRows, isTyping, relTime, type Confirmation } from "./ui.js";
+import { ConfirmDialog, SkeletonRows, agoWords, isTyping, relTime, type Confirmation } from "./ui.js";
 import { CheckIcon, ChevronDownIcon, EllipsisIcon, ExternalLinkIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, ShieldIcon, TriangleAlertIcon, UserIcon, XIcon } from "lucide-react";
-import { TabRing } from "./presence.js";
+import { TabRing, useNow } from "./presence.js";
+import { askCard } from "./card-ask.js";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/dass";
@@ -323,7 +325,7 @@ export function CodeReview({
           <EmptyState tone="bad" title="Couldn't read your pull requests" body={error} actions={<Button onClick={refresh}>Try again</Button>} />
         ) : prs && !prs.available ? (
           gh.status && !gh.status.connected ? (
-            <GitHubConnect empty identity={identity} onChange={refresh} why="See what's waiting on your review, have your own agents read each pull request first, and merge without leaving Friday." />
+            <NoGitHub identity={identity} recents={recents} gh={gh} onOpen={onOpen} onConnected={() => (void gh.read(), refresh())} />
           ) : (
             <EmptyState tone="bad" title="GitHub isn't answering" body={prs.reason || "Your pull requests couldn't be read just now."} actions={<Button onClick={refresh}>Try again</Button>} />
           )
@@ -502,6 +504,208 @@ function Stale({ error, busy, onRetry, className }: { error: string; busy?: bool
 }
 
 /** The page with nothing to show yet: Dass's empty state, with the pull request mark on its tile. */
+// ── no GitHub yet: the branches the agents have ready ──────────────────
+
+/** Lines added and taken away across what an agent changed (the Agent Board's Ready column reads it the same way, Board.tsx sizeOf). */
+function branchSize(card: BoardCard): { files: number; add?: number; del?: number } | null {
+  const f = card.review;
+  if (f?.fileCount) {
+    const fs = f.files ?? [];
+    if (!fs.some((x) => x.additions || x.deletions)) return { files: f.fileCount };
+    return { files: f.fileCount, add: fs.reduce((n, x) => n + (x.additions ?? 0), 0), del: fs.reduce((n, x) => n + (x.deletions ?? 0), 0) };
+  }
+  return card.files > 0 ? { files: card.files } : null;
+}
+
+/** What a committed branch's agent is told by Push & open PR: its own commit is there, so it pushes and opens the pull request. */
+const PUSH_ASK = "Push this branch and open a pull request for it with gh pr create: a title and a short description of what changed and how it was checked. Don't merge it.";
+
+/**
+ * Code Review with no GitHub on this computer (spec 13, "Where it sits still" 9): not only "Connect GitHub", but the branches the
+ * agents have ready, the Agent Board's Ready column (/api/board), each with its session, its files and lines, when it finished, and
+ * Push & open PR. That press connects GitHub first (a sheet with the same Connect GitHub as everywhere), then does it: changes not
+ * yet committed open the session's commit dialog at Push and open PR, its message drafted for you to look at; a branch already
+ * committed is handed to its agent to push and open. Connect GitHub stays at the top for the rest of the page.
+ */
+function NoGitHub({ identity, recents, gh, onOpen, onConnected }: { identity: Identity; recents: RecentSession[]; gh: ReturnType<typeof useGithub>; onOpen?: (sid: string, invite?: string) => void; onConnected: () => void }) {
+  const sids = recents.map((r) => r.sid).join(",");
+  const [cards, setCards] = useState<BoardCard[] | null>(sids ? null : []);
+  const [failed, setFailed] = useState("");
+  const [trying, setTrying] = useState(false);
+  const [pushing, setPushing] = useState<BoardCard | null>(null);
+  const [said, setSaid] = useState("");
+  // "done 4m ago" moves as time does.
+  useNow(30_000);
+  const read = useCallback(async () => {
+    if (!sids) return setCards([]);
+    try {
+      const r = await api<{ cards: BoardCard[] }>(identity, "/api/board", { method: "POST", body: JSON.stringify({ sids: sids.split(",") }) });
+      setCards(r.cards);
+      setFailed("");
+    } catch (e) {
+      setFailed((e as Error).message || "Friday didn't answer.");
+    }
+  }, [identity.id, sids]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Live as the board is: every 15 seconds in sight, when the window comes back, and when work finishes or is answered.
+  useEffect(() => {
+    void read();
+    const t = setInterval(() => !document.hidden && void read(), 15_000);
+    const again = () => !document.hidden && void read();
+    document.addEventListener("visibilitychange", again);
+    addEventListener("friday:attention", again);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", again);
+      removeEventListener("friday:attention", again);
+    };
+  }, [read]);
+  const ready = (cards ?? []).filter((c) => c.column === "ready" && !c.pr).sort((a, b) => b.at - a.at);
+  const inviteOf = (sid: string) => recents.find((r) => r.sid === sid)?.invite;
+
+  /** GitHub is there: the push and the pull request, the session's own way. */
+  const go = async (c: BoardCard) => {
+    setSaid("");
+    if (c.files > 0) {
+      // Changes not yet committed: the session's commit dialog, at Push and open PR (card-ask.ts, RunReview takes it).
+      askCard(c.sid, c.lane, "pr");
+      onOpen?.(c.sid, inviteOf(c.sid));
+      return;
+    }
+    const invite = inviteOf(c.sid);
+    if (!invite) return setSaid("Open the session to push it: this browser doesn't have its link.");
+    try {
+      await api(identity, `/api/sessions/${encodeURIComponent(c.sid)}/instruct?invite=${encodeURIComponent(invite)}`, { method: "POST", body: JSON.stringify({ text: PUSH_ASK, lane: c.lane }) });
+      onOpen?.(c.sid, invite);
+    } catch (e) {
+      setSaid((e as Error).message || "That didn't reach the agent.");
+    }
+  };
+  const press = (c: BoardCard) => (gh.status?.connected ? void go(c) : setPushing(c));
+  // Connecting, from the sheet: looked at every few seconds (a sign-in with gh in a terminal finishes outside the page), and once
+  // GitHub is there the sheet closes and the push goes on. Done in the look itself, not after a redraw: the page shows the pull
+  // requests as soon as GitHub is there, and this list with it is gone by then.
+  const carry = useRef<BoardCard | null>(null);
+  carry.current = pushing;
+  const look = useCallback(async () => {
+    const st = await gh.read();
+    const c = carry.current;
+    if (!st?.connected || !c) return;
+    carry.current = null;
+    setPushing(null);
+    void go(c);
+    onConnected();
+  }, [gh.read, onConnected]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!pushing) return;
+    const t = setInterval(() => void look(), 3000);
+    return () => clearInterval(t);
+  }, [pushing, look]);
+
+  const why = "See your pull requests here, have your own agents read each one first, and merge without leaving Friday.";
+  if (cards !== null && !ready.length && !failed) return <GitHubConnect empty identity={identity} onChange={onConnected} why={why} />;
+  return (
+    <div className="rv-nogh mx-auto flex w-full max-w-[880px] flex-col gap-5 pt-4">
+      <GitHubConnect identity={identity} onChange={onConnected} why={why} />
+      <section aria-label="Ready to ship" className="flex flex-col gap-3">
+        <header className="flex items-baseline justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="m-0 text-[14px] leading-[22px] font-semibold text-[var(--ink)]">
+              Ready to ship {ready.length > 0 && <span className="ml-1 font-normal text-[var(--text-muted)] tabular-nums">{ready.length}</span>}
+            </h2>
+            <p className="m-0 text-[13px] leading-[18px] text-[var(--text-muted)]">Branches your agents finished. Push one and open its pull request: GitHub is connected on the way.</p>
+          </div>
+        </header>
+        {said && (
+          <p className="m-0 text-[13px] text-[var(--red)]" role="alert">
+            {said}
+          </p>
+        )}
+        {failed && cards === null ? (
+          <DassEmpty
+            small
+            tone="bad"
+            icon={<TriangleAlertIcon />}
+            title="Couldn't read the agents' branches"
+            action={
+              <Button variant="outline" size="sm" disabled={trying} onClick={() => (setTrying(true), void read().finally(() => setTrying(false)))}>
+                {trying ? "Trying…" : "Try again"}
+              </Button>
+            }
+          >
+            <span role="alert">{failed}</span>
+          </DassEmpty>
+        ) : cards === null ? (
+          <div role="status" aria-label="Reading the agents' branches">
+            <SkeletonRows rows={3} />
+          </div>
+        ) : (
+          <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Branches ready">
+            {ready.map((c) => {
+              const size = branchSize(c);
+              return (
+                <li key={c.id} className="rv-ready-row flex min-w-0 items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 max-[560px]:flex-wrap" data-ready={c.id}>
+                  <span className="grid size-7 shrink-0 place-items-center rounded-full border border-[var(--border)] bg-[var(--bg)]" aria-hidden>
+                    {c.tool ? <EngineMark tool={c.tool} size={14} /> : <GitBranchIcon className="size-3.5 text-[var(--text-muted)]" />}
+                  </span>
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate text-[13.5px] leading-5 font-medium text-[var(--ink)]" title={c.task || c.title}>
+                      {c.task || c.title}
+                    </span>
+                    {/* Its session (when the task isn't already its name), its branch, its size and when it finished, a dot between each. */}
+                    <span className="rv-ready-meta flex min-w-0 flex-wrap items-center gap-x-1.5 text-[12px] leading-4 text-[var(--text-muted)]">
+                      {c.task && c.title !== c.task && <span className="max-w-[220px] truncate">{c.title}</span>}
+                      {c.branch && (
+                        <span className="inline-flex max-w-[200px] items-center gap-1 truncate font-mono text-[11.5px]">
+                          <GitBranchIcon className="size-3 shrink-0" />
+                          <span className="truncate">{c.branch}</span>
+                        </span>
+                      )}
+                      {size && (
+                        <span className="tabular-nums" title={`${size.files} file${size.files === 1 ? "" : "s"} changed`}>
+                          {size.add !== undefined && (size.add || size.del) ? (
+                            <>
+                              <span className="text-[var(--green)]">+{size.add}</span> <span className="text-[var(--red)]">−{size.del}</span> in {size.files} file{size.files === 1 ? "" : "s"}
+                            </>
+                          ) : (
+                            `${size.files} file${size.files === 1 ? "" : "s"}`
+                          )}
+                        </span>
+                      )}
+                      <span className="tabular-nums" title={new Date(c.at).toLocaleString()}>
+                        {c.files > 0 ? "" : `${c.status} · `}
+                        done {agoWords(c.at)}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5 max-[560px]:w-full max-[560px]:justify-end">
+                    <Button variant="ghost" size="sm" onClick={() => onOpen?.(c.sid, inviteOf(c.sid))}>
+                      Open
+                    </Button>
+                    <Button size="sm" onClick={() => press(c)}>
+                      <GitPullRequestIcon /> Push & open PR
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+      <Dialog open={!!pushing} onOpenChange={(o) => !o && setPushing(null)}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>Connect GitHub to open the pull request</DialogTitle>
+            <DialogDescription>
+              Friday pushes {pushing?.branch ? <code className="font-mono text-[12.5px]">{pushing.branch}</code> : "this branch"} and opens its pull request from this computer, signed in as you. Connect once and it carries on by itself.
+            </DialogDescription>
+          </DialogHeader>
+          <GitHubConnect identity={identity} bare onChange={() => void look()} />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function EmptyState({ title, body, actions, tone }: { title: string; body: string; actions?: ReactNode; tone?: "bad" }) {
   return (
     <DassEmpty className="mt-6" tone={tone} icon={<GitPullRequestIcon />} title={title} action={actions || undefined}>

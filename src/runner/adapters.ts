@@ -111,6 +111,12 @@ export interface TurnSpec {
    * codex chat thing", of a Codex Recents full of "You read a finished run of…").
    */
   ephemeral?: boolean;
+  /**
+   * A one-off question answered from its prompt alone (lessons, a plan, a suggestion): only Friday's instructions as its system prompt,
+   * no tools and none of the person's MCP servers, so it isn't paying for the tool's whole kit on every call (Arun, 2026-11-25: "ensure
+   * Friday is optimized for cost while maintaining performance"). Each flag is optional: an older version is asked without it.
+   */
+  lean?: boolean;
   /** Carry on from a copy of the resumed conversation rather than the conversation itself (Claude Code). */
   fork?: boolean;
   /** One of that CLI's own models. Empty means whatever it defaults to. */
@@ -548,7 +554,7 @@ export const claude: Adapter = {
   login: ["auth", "login"],
   logout: ["auth", "logout"],
   status: { args: ["auth", "status", "--json"] },
-  optional: ["--chrome", "--thinking-display", "--no-session-persistence"],
+  optional: ["--chrome", "--thinking-display", "--no-session-persistence", "--system-prompt", "--tools", "--strict-mcp-config"],
   args: (t) => [
     "-p",
     // A one-off question isn't kept as a conversation of its own (TurnSpec.ephemeral).
@@ -602,7 +608,10 @@ export const claude: Adapter = {
     // asked about as usual. In Manual a skill's use stopped the turn for a yes that told nobody anything.
     "--allowedTools",
     "Skill",
-    ...(t.systemFile ? ["--append-system-prompt-file", t.systemFile] : ["--append-system-prompt", t.system]),
+    // Lean (a one-off answered from its prompt): no tools, none of the person's MCP servers, and Friday's words as the whole system prompt.
+    ...(t.lean && offered(t, "--tools") ? ["--tools", ""] : []),
+    ...(t.lean && offered(t, "--strict-mcp-config") ? ["--strict-mcp-config"] : []),
+    ...(t.systemFile ? ["--append-system-prompt-file", t.systemFile] : t.lean && offered(t, "--system-prompt") ? ["--system-prompt", t.system] : ["--append-system-prompt", t.system]),
     ...(t.resumeId ? ["--resume", t.resumeId, ...(t.fork ? ["--fork-session"] : [])] : []),
   ],
   stdin: (t) => t.prompt,
@@ -2263,6 +2272,11 @@ export const gemini: Adapter = acp({
  * It signs in as it starts (the browser on this computer, a link and a code over SSH) and keeps the sign-in in the system
  * keychain. `agy models` says which: it lists the account's models, or "Please sign in to view available models".
  * It has no command to sign out with: that is its own /logout.
+ *
+ * A Gemini API key in the environment (GEMINI_API_KEY, GOOGLE_API_KEY) reaches it like any other tool's (Arun, 2026-11-24: "make
+ * friday pass the gemini api key to agy"): agy then runs on the key, which since 1.5.12 offers the Gemini 4 models (Neon, Hydrogen,
+ * Carbon) a personal Google sign-in doesn't. Until then Friday left both out, as an inherited key switched agy to key sign-in that
+ * its models refused. Its usage is then the key's, in Google AI Studio (tool-limits.ts readAntigravity).
  */
 export const antigravity: Adapter = acp({
   tool: "antigravity",
@@ -2283,33 +2297,6 @@ export const ANTIGRAVITY_MODELS = ["--log-file", devNull, "models"];
  * models". It reads its own sign-in from the keychain, opens no browser, and Friday reads no token. Anything else it says (no
  * network, say) is unknown, not signed out.
  */
-/**
- * Whether agy is set to run on an API-key provider of its own (its settings' `modelProvider`, as Orca reads it): only then are the
- * key variables in the environment its to use. Otherwise an inherited GEMINI_API_KEY or GOOGLE_API_KEY (Gemini CLI's, say) switches
- * agy to key sign-in, which its models turn down (401), so they are left out of everything Friday starts agy for, as Orca and
- * T3 Code do. A settings file that can't be read as JSON is taken as one that may name a provider.
- */
-export function agyOwnKeys(home = homedir()): boolean {
-  let text: string;
-  try {
-    text = readFileSync(path.join(home, ".gemini", "antigravity-cli", "settings.json"), "utf8");
-  } catch {
-    return false;
-  }
-  try {
-    const j = JSON.parse(text) as Record<string, unknown> | null;
-    return !!(j && typeof j === "object" && j.modelProvider);
-  } catch {
-    return true;
-  }
-}
-/** A tool's environment without what would mislead it (see agyOwnKeys): Windows names are matched in any case, as Windows does. */
-export function toolEnv<E extends Record<string, string | undefined>>(tool: EngineTool, env: E): E {
-  if (tool !== "antigravity" || agyOwnKeys()) return env;
-  const out = { ...env };
-  for (const k of Object.keys(out)) if (/^(?:GEMINI_API_KEY|GOOGLE_API_KEY)$/i.test(k)) delete out[k];
-  return out;
-}
 
 export async function antigravitySignedIn(bin: string): Promise<boolean | null> {
   const r = await runCli(bin, ANTIGRAVITY_MODELS, 15_000, {}, "antigravity").catch(() => null);
@@ -3372,7 +3359,7 @@ export const isClaudeAppBundled = (bin: string) => {
 export async function runCli(bin: string, args: string[], timeoutMs = 20_000, extraEnv: Record<string, string> = {}, tool?: EngineTool): Promise<{ code: number; out: string }> {
   const how = await launcher(bin);
   const env = { ...childEnv(), ...how.env, ...extraEnv };
-  const r = await execCli(how.command, [...how.prefix, ...args], { env: tool ? toolEnv(tool, env) : env, timeoutMs });
+  const r = await execCli(how.command, [...how.prefix, ...args], { env, timeoutMs });
   return { code: r.code, out: `${r.stdout}${r.stderr}`.trim() };
 }
 

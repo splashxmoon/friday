@@ -119,10 +119,10 @@ export class PhonePush {
     return sent;
   }
 
-  /** A run done, for whoever set it going: sent once by its key. */
-  async done(once: string, note: PushNote): Promise<number> {
+  /** A run done, for whoever set it going: sent once by its key. A question (a Captain's) goes time-sensitive, as an agent's does. */
+  async done(once: string, note: PushNote, level: "time-sensitive" | "active" = "active"): Promise<number> {
     if (!this.o.relay) return 0;
-    return this.once(once, note, "active");
+    return this.once(once, note, level);
   }
 
   private async once(id: string, note: PushNote, level: "time-sensitive" | "active"): Promise<number> {

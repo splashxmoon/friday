@@ -90,14 +90,23 @@ function worktreeAdd(root: string, args: string[], timeout = 0): Promise<string>
  * `git worktree <args>` in the same per-repository line as every add: a teammate's copy (app.ts copyFor) is made there too, and
  * so is the `worktree prune` before it, which could otherwise take a worktree another add has half made.
  */
-export async function worktreeChange(root: string, args: string[], timeout = 0): Promise<string> {
+export function worktreeChange(root: string, args: string[], timeout = 0): Promise<string> {
+  return inWorktreeLine(root, () => git(root, ["worktree", ...args], [0], timeout));
+}
+
+/**
+ * `fn` (a worktree add, remove or prune made with a caller's own git) run in that same per-repository line, so no two of them
+ * overlap: a prune beside an add could take the worktree the add had half made (spec 13; the restack's, the before-clip's and the
+ * storage sweep's went outside it). `root` is any folder of the repository, or its .git itself.
+ */
+export async function inWorktreeLine<T>(root: string, fn: () => Promise<T>): Promise<T> {
   let key = commonDirs.get(root);
   if (!key) {
-    key = (await git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).catch(() => root)).trim() || root;
+    key = path.resolve(root, (await git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).catch(() => root)).trim() || root);
     commonDirs.set(root, key);
   }
   const k = key;
-  const run = (adding.get(k) ?? Promise.resolve()).catch(() => {}).then(() => git(root, ["worktree", ...args], [0], timeout));
+  const run = (adding.get(k) ?? Promise.resolve()).catch(() => {}).then(fn);
   adding.set(k, run);
   void run.catch(() => {}).then(() => void (adding.get(k) === run && adding.delete(k)));
   return run;
@@ -803,7 +812,7 @@ export async function dropWorktree(dir: string, force: boolean | "committed" = t
   // Its kept snapshot index is named for the top as git spells it, so that is asked for while git can still answer.
   const top = await git(real, ["rev-parse", "--show-toplevel"]).then((s) => s.trim(), () => null);
   // Retried: on Windows a file git, an editor or a virus scan still holds for a moment fails the delete with EBUSY (CI, 2026-11-02).
-  await git(real, ["worktree", "remove", "--force", real]).catch(() => rm(real, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  await inWorktreeLine(real, () => git(real, ["worktree", "remove", "--force", real])).catch(() => rm(real, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   if (top) for (const f of [keptIndex(top), `${keptIndex(top)}.exclude`]) await rm(f, { force: true }).catch(() => {});
   return true;
 }
@@ -1652,14 +1661,27 @@ export async function commitAll(cwd: string, message: string, branch?: string, o
       // Five minutes: room for a pre-commit hook that runs the tests, not forever for one that waits on a prompt.
       await git(root, ["commit", "-q", "-m", msg], [0], 300_000);
     } catch (e) {
-      // A hook that said no leaves the folder where it was, not on a branch the session never heard of.
+      const m = (e as Error).message;
+      const why = /tell me who you are|user\.email/i.test(m) ? "git doesn't know who you are on this machine. Run `git config --global user.name` and `user.email` there once, then commit again." : m.split("\n").slice(-3).join(" ");
+      // A hook that said no leaves the folder where it was, not on a branch the session never heard of. Tried twice (something can
+      // hold the index a moment); if it still can't go back (the hook left a file the switch would overwrite), that is said with the
+      // commit's error, with the branch the folder is on, rather than swallowed and the folder left on it unknown (spec 13, item 12).
       if (branch) {
-        await git(root, was ? ["switch", "-q", was] : ["switch", "-q", "--detach", wasAt]).catch(() => {});
+        const back = was ? ["switch", "-q", was] : ["switch", "-q", "--detach", wasAt];
+        let stuck = "";
+        for (let i = 0; i < 2; i++) {
+          stuck = await git(root, back).then(() => "", (err: Error) => err.message || "git refused");
+          if (!stuck) break;
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        if (stuck) {
+          const on = await git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).then((s) => s.trim(), () => branch);
+          const reason = stuck.split("\n").map((l) => l.trim().replace(/^(error|fatal):\s*/i, "")).filter((l) => l && !/^(hint|Aborting)/i.test(l)).slice(0, 2).join(" ");
+          throw new Error(`${why.replace(/[\s.]*$/, ".")} The folder couldn't go back to ${was || "where it was"} and is still on ${on === "HEAD" ? "a detached commit" : on}: ${reason.replace(/[\s.]*$/, ".")} Switch it back yourself once that's sorted.`);
+        }
         if (made) await git(root, ["branch", "-q", "-D", made]).catch(() => {});
       }
-      const m = (e as Error).message;
-      if (/tell me who you are|user\.email/i.test(m)) throw new Error("git doesn't know who you are on this machine. Run `git config --global user.name` and `user.email` there once, then commit again.");
-      throw new Error(m.split("\n").slice(-3).join(" "));
+      throw new Error(why);
     }
     // The person's other staged changes, staged again; the paths just committed match the commit. The commit is made by
     // now, so this can't fail it: at worst nothing is left staged, which is how it always was.

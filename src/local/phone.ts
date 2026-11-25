@@ -102,7 +102,7 @@ export interface PhoneState {
   devices: ShownDevice[];
   /** Where another computer reaches this one, open or not (computers.ts): the port it pairs with, the certificate it pins. */
   computers?: { port: number | null; fingerprint: string; addresses: string[] };
-  /** Reach from anywhere (reach.ts): through Friday's relay, which only passes ciphertext. */
+  /** Away from this network (reach.ts): through Friday's relay, which only passes ciphertext. */
   reach?: ReachState;
   error?: string;
 }
@@ -361,7 +361,7 @@ export class PhoneAccess {
   /** This computer through the relay, for phones away from its network (reach.ts). */
   private reach: ReachHome;
 
-  /** Reach from anywhere on or off: only ever with phone access on, so turning that off closes the relay too. */
+  /** The relay's own switch, kept for older callers: it is on whenever phone access is, so turning that off closes the relay too. */
   async setReach(on: boolean): Promise<PhoneState> {
     this.error = "";
     if (on && !(await this.phoneOn())) {
@@ -473,7 +473,7 @@ export class PhoneAccess {
     // Its names too, after the addresses: a computer that moves to another network, or is given another address, is still
     // found by name, where the addresses alone left the other one reconnecting for good (2026-11-04 linking test).
     const names = kind === "computer" ? await this.names() : [];
-    // A phone's code carries the relay route too, while Reach from anywhere is on (only with a certificate: the relay must never
+    // A phone's code carries the relay route too (only with a certificate: the relay must never
     // carry plain HTTP).
     const relay = kind === "phone" && this.secure ? await this.route() : null;
     const q = new URLSearchParams({ h: [...addresses.map((a) => a.address), ...names].join(","), p: String(this.port), c: code, s: this.secure ? "https" : "http", n: this.o.computer, ...(this.secure ? { f: this.fingerprint } : {}), ...(relay ? { r: relay.id, rb: relay.relay } : {}) });
@@ -702,7 +702,7 @@ export class PhoneAccess {
     // Open for another computer while phone access is off: a phone is refused (audit REST-1).
     if (device.kind !== "computer" && !(await this.phoneOn())) return end(res, 401, { error: "Phone access is off in Friday on this computer." });
     if (url.pathname === "/phone/hello" && req.method === "GET") {
-      // The relay route too, so a phone paired before Reach from anywhere was on learns it without pairing again.
+      // The relay route too, so a phone paired before the relay was always on learns it without pairing again.
       const relay = device.kind !== "computer" && this.secure ? await this.route() : null;
       return end(res, 200, { computer: this.o.computer, device: device.id, ...(this.o.version ? { version: this.o.version } : {}), notifies: !!device.push, ...(relay ? { relay } : {}) });
     }

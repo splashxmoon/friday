@@ -1,6 +1,8 @@
 import { ChevronRightIcon, FolderGit2Icon, ListFilterIcon, PinIcon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, MoonIcon, SunIcon, XIcon } from "lucide-react";
 import "./working-dot.css";
 import "./sidebar-row-width.css";
+import "./live-session.css";
+import "./sidebar-cards.css";
 import { openKeepGoing } from "./crew-carry-open.js";
 import { plainLine } from "./team-room.js";
 import { mateItems, roomItems } from "./mate-menu.js";
@@ -24,9 +26,10 @@ import { Avatar, Icon, type IconName } from "./icons.js";
 import { isDefaultRail, moveInRail, readRail, saveRail, setShown, shownOf, useRailLayout, type RailPlace } from "./rail-layout.js";
 import type { AgentView, PersonListing } from "../agents.js";
 import { useNeedsCount, withCode, type AttentionState } from "./Attention.js";
+import { CaptainStrip, ManagerPopover, ManagersBar, ManagerSetup, managerFor, useManagers, type ManagedProject } from "./Managers.js";
 import type { Attention } from "../attention.js";
 import { recordLine, useAgentRecords } from "./useAgentRecords.js";
-import type { Crew, CrewState, Preview, RowFacts, Working } from "../attention.js";
+import type { Crew, CrewState, Preview, RowFacts, SessionPr, Working } from "../attention.js";
 import { usePrs } from "./prWatch.js";
 import { hostApi } from "./local.js";
 import { openOutside } from "./openOutside.js";
@@ -46,7 +49,7 @@ import { agentLine, lowerWord } from "../agent-line.js";
 import { agentWord, CrewMark, CrewTools } from "./crew-marks.js";
 import { namedBranch } from "./branch-names.js";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
-import { doingWords, QUIET_AFTER_MS, quietFor } from "../step-words.js";
+import { liveWords, QUIET_AFTER_MS, quietFor } from "../step-words.js";
 import { useSettledOrder } from "./sidebar-order.js";
 import { shortcut } from "./Shortcuts.js";
 import { choosePlace, CodeCrewToggle, isWorkSid, useWorkSessions } from "./WorkMode.js";
@@ -55,7 +58,8 @@ import { Face, isTeamSid, MateRing, mateStatus, newTeammate, openRoom, openTeamm
 import { roleWord, rowState } from "./team-status.js";
 import { byDay } from "./sidebar-days.js";
 import { ALL as ALL_AGENTS, useFocusedAgent } from "./agentFocus.js";
-import { byState, DoneRing, StateRing, useFlip, useNow, type Presence } from "./presence.js";
+import { byState, DoneRing, LiveClock, reducedMotion, StateRing, useFlip, useNow, type Presence } from "./presence.js";
+import { Shine } from "./shine.js";
 import { api } from "./api.js";
 import { markUnread, useUnread } from "./unread.js";
 import { noticeDue, UsageNotice, useUsageSharing } from "./UsageSharing.js";
@@ -372,7 +376,7 @@ const onlyLimited = (a: Crew["agents"]) => a.some((x) => x.state === "limited") 
  * spinning circle ring thing to the right of the tab session title name"): the turning ring while its agents work, amber while
  * it waits on you, red when a run failed. A quiet session has none, so the ones at work stand out.
  */
-function SessionRing({ state, crew, working, title, unread = false, stopped = false, quiet }: { state: "needs" | "working" | "idle"; crew: Crew | null; working: Working | null; title?: string | undefined; /** Its agents finished while you were elsewhere (unread.ts). */ unread?: boolean; /** What waits on you is a run that stopped on an error: the red ring, as everywhere a stop shows. */ stopped?: boolean; /** Its agents are working but haven't been heard from in a while: how long, for the dashed ring's tip. */ quiet?: string | undefined }) {
+function SessionRing({ state, crew, working, title, unread = false, stopped = false, quiet, idleRing = false }: { state: "needs" | "working" | "idle"; crew: Crew | null; working: Working | null; title?: string | undefined; /** A sidebar row: an idle thread shows a grey ring in the ring's place rather than nothing. */ idleRing?: boolean; /** Its agents finished while you were elsewhere (unread.ts). */ unread?: boolean; /** What waits on you is a run that stopped on an error: the red ring, as everywhere a stop shows. */ stopped?: boolean; /** Its agents are working but haven't been heard from in a while: how long, for the dashed ring's tip. */ quiet?: string | undefined }) {
   const a = crew?.agents ?? [];
   // Working, but nothing heard for a while: a still, dashed ring in place of the turning one, so it doesn't pass for busy (Orca's
   // "unconfirmed", Arun 2026-11-03). Never a check: silence isn't done.
@@ -391,6 +395,16 @@ function SessionRing({ state, crew, working, title, unread = false, stopped = fa
   if (!pr && (unread || a.some((x) => x.state === "done")))
     return (
       <DoneRing fresh={unread} />
+    );
+  // Idle, in the sidebar: a quiet grey ring, the finished ring's size and place, so every thread hangs off the tree by a ring (Arun,
+  // 2026-11-24: "also add a grey circle or something for the idle chats too").
+  if (!pr && idleRing)
+    return (
+      <span className="state-ring sb-idle" role="img" aria-label="Idle" title={title ?? "Idle"}>
+        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+          <circle cx="6" cy="6" r="4.375" />
+        </svg>
+      </span>
     );
   return <StateRing state={pr} title={title} />;
 }
@@ -441,7 +455,8 @@ export function CrewLine({ crew, now, lead }: { crew: Crew; now: number; /** Wha
     // Handed on to a crew mate: said in the row's own line while it works (Code and Crew, connected, 2026-11-13).
     : crew.handed && working.every((x) => crew.handedLanes?.includes(x.lane)) ? crew.handed
     : working.length > 1 ? "working"
-    : working.length ? `${short(working[0]!.name, working[0]!.tool)} · ${working[0]!.doing ? doingWords(working[0]!.doing) : "working"}`
+    // Its step under way, else where it is between steps, in the words the reply and the side panel say (step-words.ts liveWords).
+    : working.length ? `${short(working[0]!.name, working[0]!.tool)} · ${liveWords(working[0]!)}`
     : quiet.length ? `${short(quiet[0]!.name, quiet[0]!.tool)} · no update in ${quietFor(quiet[0]!.heardAt!, now)}`
     : a.every((x) => x.state === "offline") ? "Offline"
     : a.length === 1 || early.length || of("limited").length ? line(early[0] ?? of("limited")[0] ?? a[0]!)
@@ -470,7 +485,8 @@ export function CrewLine({ crew, now, lead }: { crew: Crew; now: number; /** Wha
       {working.length > 1 && <CrewTools agents={working.map((x) => ({ key: x.lane, tool: x.tool, face: x.face }))} names={working.map((x) => short(x.name, x.tool))} label={`${working.length} working: ${working.map((x) => short(x.name, x.tool)).join(", ")}`} />}
       {/* The agent the line is about, in the face it wears everywhere (agent-face.ts): two of Friday's agents are told apart here too. */}
       {about && working.length <= 1 && <span className="sb-crew-mark" aria-hidden="true"><CrewMark x={about} /></span>}
-      <span className={`truncate sb-crew-words${failed.length ? " failed" : held.some((x) => x.you) ? " needs" : held.length ? "" : working.length ? " working" : quiet.length ? " quiet" : early.some((x) => x.you) ? " needs" : ""}`}>{words}</span>
+      {/* The step under way shines as a reply's live line does (shine.tsx): working, said as working (spec 13). */}
+      <Shine on={!failed.length && !held.length && working.length > 0} className={`truncate sb-crew-words${failed.length ? " failed" : held.some((x) => x.you) ? " needs" : held.length ? "" : working.length ? " working" : quiet.length ? " quiet" : early.some((x) => x.you) ? " needs" : ""}`}>{words}</Shine>
     </span>
   );
 }
@@ -1212,7 +1228,7 @@ function CrewList({ p }: { p: SidebarProps }) {
                 {rooms.map(roomRow)}
                 <div className="oss-crew-label">
                   <span>Your crew</span>
-                  <span className="oss-crew-count">{ownOf(t).length}</span>
+                  <MovingCount className="oss-crew-count" n={ownOf(t).length} />
                 </div>
                 {mates.map(mateRow)}
                 {newGroup}
@@ -1265,7 +1281,7 @@ function CrewList({ p }: { p: SidebarProps }) {
                   <span className="oss-folder-name">{name}</span>
                   <Icon name={open ? "chevronDown" : "chevronRight"} size={12} className="oss-folder-chev" />
                   <span className="oss-folder-gap" />
-                  <span className="oss-crew-count">{rs.length + ms.length}</span>
+                  <MovingCount className="oss-crew-count" n={rs.length + ms.length} />
                 </button>
                 {open && (
                   <div className="oss-folder-body">
@@ -1465,9 +1481,11 @@ deleteBody = (r) =>
 
 // ── a group of the list: a label that folds it, an action, and its rows ─────────────────────
 
-function Group({ label, open, onToggle, count, status, action, drag, children, className = "" }: { label: ReactNode; open: boolean; onToggle: () => void; count?: number; /** How it stands, at the row's end, folded or not. */ status?: ReactNode; action?: ReactNode; drag?: Partial<React.HTMLAttributes<HTMLDivElement>>; children: ReactNode; className?: string }) {
+function Group({ label, open, onToggle, count, status, action, drag, children, className = "", facts, strip }: { label: ReactNode; open: boolean; onToggle: () => void; count?: number; /** How it stands, at the row's end, folded or not. */ status?: ReactNode; action?: ReactNode; drag?: Partial<React.HTMLAttributes<HTMLDivElement>>; children: ReactNode; className?: string; /** A project's card: its facts under its name, folded or not, and its threads on a tree (sidebar-cards.css). */ facts?: ReactNode; /** Its Captain's band, across the card's top, folded or not (Managers.tsx). */ strip?: ReactNode }) {
   return (
-    <SidebarGroup className={`sb-tray p-0 ${className}`}>
+    <SidebarGroup className={`sb-tray p-0 ${facts ? "sb-card " : ""}${className}`}>
+      {/* Its Captain's band across the card's top (Managers.tsx; Arun, 2026-11-25: H). */}
+      {strip}
       <Collapsible open={open} onOpenChange={onToggle}>
         <div className="group/label relative flex items-center" {...drag}>
           <SidebarGroupLabel asChild className="h-7 flex-1 cursor-pointer gap-1 px-2 text-[12px] font-medium normal-case tracking-normal text-[var(--text-muted)] hover:text-sidebar-accent-foreground">
@@ -1486,11 +1504,48 @@ function Group({ label, open, onToggle, count, status, action, drag, children, c
           </SidebarGroupLabel>
           {action}
         </div>
+        {facts && <div className="sb-card-facts">{facts}</div>}
         <CollapsibleContent>
-          <SidebarGroupContent className="flex flex-col gap-px pt-0.5">{children}</SidebarGroupContent>
+          <SidebarGroupContent className={`flex flex-col gap-px pt-0.5${facts ? " sb-tree" : ""}`}>{children}</SidebarGroupContent>
         </CollapsibleContent>
       </Collapsible>
     </SidebarGroup>
+  );
+}
+
+/**
+ * A project's facts, under its name on its card (Arun, 2026-11-24: "making the project things into cards with info and threads nested
+ * in them"): how many threads, the change they carry between them (each row's own +/−, attention.ts rowFactsOf), and its pull
+ * requests still open. Never a branch: each thread works on its own.
+ */
+function ProjectFacts({ chats, facts, prs }: { chats: readonly RecentSession[]; facts: ReadonlyMap<string, RowFacts>; prs: ReadonlyMap<string, SessionPr> }) {
+  let added = 0;
+  let removed = 0;
+  let files = 0;
+  let open = 0;
+  for (const c of chats) {
+    const f = facts.get(c.sid);
+    if (f) (added += f.added, removed += f.removed, files += f.files);
+    const pr = prs.get(c.sid);
+    if (pr && !pr.merged) open++;
+  }
+  const n = chats.length;
+  return (
+    <>
+      <span>{n ? `${n} thread${n === 1 ? "" : "s"}` : "No threads"}</span>
+      {files > 0 && (
+        <span className="sb-card-fact sb-changes" title={`${files} file${files === 1 ? "" : "s"} changed across its threads: ${added.toLocaleString()} line${added === 1 ? "" : "s"} added, ${removed.toLocaleString()} removed`}>
+          {(added > 0 || !removed) && <span className="add">+{added.toLocaleString()}</span>}
+          {removed > 0 && <span className="del">−{removed.toLocaleString()}</span>}
+        </span>
+      )}
+      {open > 0 && (
+        <span className="sb-card-fact" title={`${open} pull request${open === 1 ? "" : "s"} open from its threads`}>
+          <Icon name="gitPullRequest" size={12} />
+          {open} open
+        </span>
+      )}
+    </>
   );
 }
 
@@ -1565,6 +1620,10 @@ function AgentsList({ p }: { p: SidebarProps }) {
 
 function SessionsList({ p }: { p: SidebarProps }) {
   const [renaming, setRenaming] = useState<Renaming>(null);
+  // The project Managers (Managers.tsx, spec 14): their bar at the top, each one on its project's tile, its panel, its setup sheet.
+  const mgr = useManagers(p.identityForApi, isLocal());
+  const [mgrOpen, setMgrOpen] = useState<string | null>(null);
+  const [mgrSetup, setMgrSetup] = useState<{ project?: string; folder?: string } | null>(null);
   // Deleting a project is the one thing in this list that is not undoable, so it asks first.
   const [ask, confirmUI] = useConfirm();
   const [drop, setDrop] = useState<string | null>(null);
@@ -1902,7 +1961,6 @@ function SessionsList({ p }: { p: SidebarProps }) {
     <ChatRow
       key={r.sid}
       r={r}
-      {...(group ? { group } : {})}
       {...(quiet ? { quiet } : {})}
       me={p.identity.name}
       active={r.sid === p.activeSid}
@@ -1923,6 +1981,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
       crew={p.attention.crews.get(r.sid) ?? null}
       since={p.attention.since.get(r.sid)}
       prs={p.attention.prs.get(r.sid)?.urls ?? []}
+      pr={p.attention.prs.get(r.sid) ?? null}
       facts={p.attention.facts.get(r.sid) ?? null}
       picked={picked.has(r.sid)}
       onPick={(e) => pickWith(e, r.sid)}
@@ -1978,6 +2037,13 @@ function SessionsList({ p }: { p: SidebarProps }) {
     return [...by.values()].filter((g) => g.chats.length > 1 || !g.chats[0]!.repos?.[0]?.made);
   })();
   const filed = new Set(repoGroups.flatMap((g) => g.chats.map((c) => c.sid)));
+  // Each folder's project as its Manager reads it: where it is, how many threads run there, how many wait on you.
+  const mgrProjects = new Map<string, ManagedProject>(
+    repoGroups
+      .map((g) => ({ g, folder: g.chats.find((c) => c.repos?.[0]?.path && !c.repos[0].made)?.repos?.[0]?.path ?? "" }))
+      .filter((x) => x.folder)
+      .map(({ g, folder }) => [g.name, { name: g.name, folder, running: g.chats.filter((c) => p.attention.working.has(c.sid)).length, needs: loose.filter((c) => inNeeds.has(c.sid) && c.repos?.[0]?.name === g.name).length }]),
+  );
   const unfiled = loose.filter((r) => !filed.has(r.sid) && !inNeeds.has(r.sid));
 
   const blocks = new Map<string, ReactNode>();
@@ -1995,7 +2061,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
           const open = !proj.collapsed || draft;
           const isRenaming = renaming?.kind === "project" && renaming.id === proj.id;
           return (
-            <div key={proj.id} className={`rounded-lg ${drop === proj.id ? "bg-sidebar-accent ring-1 ring-sidebar-ring" : ""}`} {...dropZone(proj.id, !open)}>
+            <div key={proj.id} className={`sb-card sb-proj-card${drop === proj.id ? " sb-card-drop" : ""}`} {...dropZone(proj.id, !open)}>
               <div
                 className="dass-row flex-row items-center gap-2 py-1"
                 role="button"
@@ -2049,8 +2115,9 @@ function SessionsList({ p }: { p: SidebarProps }) {
                   <MenuButton label={`${proj.name} actions`} items={() => projectMenu(proj, items.length)} />
                 </span>
               </div>
+              {!isRenaming && <div className="sb-card-facts"><ProjectFacts chats={items} facts={p.attention.facts} prs={p.attention.prs} /></div>}
               {open && (
-                <div className="ml-3 flex flex-col gap-px border-l border-sidebar-border pl-1">
+                <div className="sb-tree flex flex-col gap-px">
                   {draft && (
                     <div className="dass-row" data-active="true" aria-current="page">
                       <div className="flex items-center gap-2">
@@ -2086,6 +2153,17 @@ function SessionsList({ p }: { p: SidebarProps }) {
         count={g.chats.length}
         status={<GroupState working={g.chats.filter((c) => p.attention.working.has(c.sid)).length} needs={loose.filter((c) => inNeeds.has(c.sid) && c.repos?.[0]?.name === g.name).length} />}
         drag={dragSection(id)}
+        facts={<ProjectFacts chats={g.chats} facts={p.attention.facts} prs={p.attention.prs} />}
+        strip={(() => {
+          // Its Captain's strip (Arun, 2026-11-24: the B layout, "maybe i want this layout design", then "B strip, keep the bar").
+          const m = managerFor(mgr.managers, { name: g.name, folder: mgrProjects.get(g.name)?.folder });
+          if (!m) return undefined;
+          return (
+            <ManagerPopover m={m} p={mgrProjects.get(g.name)} api={mgr} open={mgrOpen === `line:${m.id}`} onOpenChange={(v) => setMgrOpen(v ? `line:${m.id}` : null)}>
+              <CaptainStrip m={m} p={mgrProjects.get(g.name)} />
+            </ManagerPopover>
+          );
+        })()}
         className={isLocal() && g.chats.some((c) => c.repos?.[0]?.path) ? "sb-repo-group" : ""}
         action={
           isLocal() && g.chats.some((c) => c.repos?.[0]?.path) ? (
@@ -2191,6 +2269,8 @@ function SessionsList({ p }: { p: SidebarProps }) {
         })()
       ) : (
       <>
+      {isLocal() && (mgr.managers.length > 0 || mgrProjects.size > 0) && <ManagersBar api={mgr} projects={mgrProjects} open={mgrOpen} setOpen={setMgrOpen} onAdd={(p) => setMgrSetup(p ? { project: p.name, folder: p.folder } : {})} />}
+      {isLocal() && <ManagerSetup api={mgr} projects={mgrSetup?.folder && mgrSetup.project && !mgrProjects.has(mgrSetup.project) ? [...mgrProjects.values(), { name: mgrSetup.project, folder: mgrSetup.folder }] : [...mgrProjects.values()]} {...(mgrSetup?.project ? { initial: mgrSetup.project } : {})} open={!!mgrSetup} onClose={() => setMgrSetup(null)} />}
       {needing.length > 0 && (
         <Group
           label={
@@ -2315,12 +2395,11 @@ function PickBar({ picked, projects, ask, onDone, update, remove, del, createPro
             title: `Delete ${n} thread${n === 1 ? "" : "s"}?`,
             body: mine.length === n ? "They're deleted for everyone in them, with their history and files. This can't be undone." : mine.length ? `The ${mine.length} that are yours are deleted for everyone in them, with their history and files; the others only leave your list. This can't be undone.` : "They only leave your list: they're other people's.",
             action: mine.length ? "Delete" : "Remove",
-            onConfirm: async () => {
+            // All at once, each off the list as it is asked (App.tsx deleteSession); one refused comes back and says why.
+            onConfirm: () => {
               for (const r of picked) {
-                if (r.role === "owner") {
-                  const e = await del(r.sid);
-                  if (e) sayNotice(e);
-                } else remove(r.sid);
+                if (r.role === "owner") void del(r.sid).then((e) => e && sayNotice(e));
+                else remove(r.sid);
               }
               onDone();
             },
@@ -2366,8 +2445,73 @@ function useSbFilter(): SbFilter {
 }
 
 /** A row's time in words, for its tooltip: "Working for 4m", "Waiting on you since just now", "Finished 12m ago". */
-const stateFor = (st: "needs" | "working" | "done", t: string) =>
-  st === "done" ? `Finished ${t === "now" ? "just now" : `${t} ago`}` : `${st === "needs" ? "Waiting on you" : "Working"} ${t === "now" ? "since just now" : `for ${t}`}`;
+/**
+ * A count that moves to its new value rather than snapping (spec 13: "Counts, new rows and moving cards snap"): counted through in
+ * 450ms, eased out, as the motion library's AnimatedNumber does, without that library on the first load (test/client-bundle.test.ts
+ * keeps it out). Drawn first as it is; with less motion asked for, it changes at once.
+ */
+function MovingCount({ n, className }: { n: number; className: string }) {
+  const [shown, setShown] = useState(n);
+  const from = useRef(n);
+  useEffect(() => {
+    const start = from.current;
+    from.current = n;
+    if (start === n || reducedMotion()) return void setShown(n);
+    const t0 = performance.now();
+    let raf = 0;
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / 450);
+      setShown(Math.round(start + (n - start) * (1 - (1 - k) ** 3)));
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [n]);
+  return <span className={`${className} tabular-nums`}>{shown}</span>;
+}
+
+/** The sessions the sidebar has drawn a row for since it opened: a row not among them is new, and rises in (ChatRow `fresh`). */
+const seenRows = new Set<string>();
+
+/** "Asks: per API key or per IP?", "Asks: OK to run `rm -rf build`?": what a session waiting on you asks, in the row's one line. */
+function asksLine(needs: Attention): ReactNode {
+  const asks = (what: ReactNode) => (
+    <>
+      <b className="sb-asks-word">Asks:</b> {what}
+    </>
+  );
+  if (needs.kind === "approval") {
+    const cmd = needs.items?.[0];
+    const more = (needs.items?.length ?? 0) > 1 ? ` and ${needs.items!.length - 1} more` : "";
+    return asks(cmd ? <>OK to run {withCode(`\`${cmd.length > 60 ? `${cmd.slice(0, 59)}…` : cmd}\``)}{more}?</> : "OK to go on?");
+  }
+  if (needs.kind === "question" || needs.kind === "ask") return asks(isRawError(needs.text) ? "Needs you" : withCode(shortPaths(needs.text)));
+  return withCode(shortPaths(isRawError(needs.text) ? "Needs you" : needs.text));
+}
+
+/** A finished row's pull request: its number and where it stands, the checks' word from the PR watch when it has read it. */
+function prWords(url: string, merged: boolean, watched: ReturnType<typeof usePrs>["prs"]): { number: string; words: string; tone: string } {
+  const number = /\/pull\/(\d+)/.exec(url)?.[1] ?? url.split("/").pop() ?? "";
+  const seen = [...(watched?.mine ?? []), ...(watched?.merged ?? [])].find((p) => p.url === url);
+  if (merged || seen?.mergedAt) return { number, words: "merged", tone: "merged" };
+  const c = seen?.checks;
+  if (c === "passing") return { number, words: "checks pass", tone: "ok" };
+  if (c === "failing") return { number, words: "checks failing", tone: "bad" };
+  if (c === "pending") return { number, words: "checks running", tone: "" };
+  return { number, words: seen?.draft ? "draft" : "open", tone: "" };
+}
+
+/**
+ * How a run that isn't working ended, for the row's time: stopped by someone, on an error, or out of usage are not "Finished" (spec 13
+ * polish: a stopped row's time read "Finished just now" while its marks and the side panel said "Stopped").
+ */
+const endWord = (crew: Crew | null | undefined) => {
+  const a = crew?.agents ?? [];
+  return a.some((x) => x.state === "failed") ? "Stopped on an error" : a.length && onlyLimited(a) ? "Out of usage" : a.some((x) => x.state === "stopped") && !a.some((x) => x.state === "done") ? "Stopped" : "Finished";
+};
+const stateFor = (st: "needs" | "working" | "done", t: string, ended = "Finished") =>
+  // Out of usage still is: "since just now", "for 4m", as a wait is said.
+  st === "done" && ended !== "Out of usage" ? `${ended} ${t === "now" ? "just now" : `${t} ago`}` : `${st === "needs" ? "Waiting on you" : st === "working" ? "Working" : ended} ${t === "now" ? "since just now" : `for ${t}`}`;
 
 function ChatRow({
   r,
@@ -2389,14 +2533,14 @@ function ChatRow({
   quiet,
   since,
   prs = [],
+  pr = null,
   waiting = false,
   facts = null,
   picked = false,
   onPick,
-  group,
 }: {
-  /** The folder whose group it is drawn in, if any: its row doesn't say that folder again. */
-  group?: string;
+  /** Its latest pull request and whether it merged (attention.ts SessionPr): a finished row with one says where it stands. */
+  pr?: SessionPr | null;
   /** Picked with others, to act on together (SessionList's pickWith). */
   picked?: boolean;
   /** A click with ⌘, Ctrl or Shift picks it rather than opening it: true when it did. */
@@ -2445,6 +2589,15 @@ function ChatRow({
   // remembered when the session was last open.
   const repo = r.repos?.find((u) => u.branch) ?? r.repos?.[0];
   const place = { folder: facts?.folder || repo?.name || "", branch: [facts?.branch, repo?.branch].find((b) => namedBranch(b)) ?? "" };
+  // At work, and not stopped or quiet: the line under its name is its step, the time how long it has been at it, counting.
+  const live = !!working && !needs && !quiet && !short;
+  // Finished with a pull request: where that stands, from the PR watch's latest read (prWatch.ts), else open or merged.
+  const { prs: watched } = usePrs();
+  const prUrl = !live && !needs && !quiet ? (pr?.url ?? prs.at(-1)) : undefined;
+  const prLine = prUrl ? prWords(prUrl, pr?.merged ?? false, watched) : null;
+  // A row new since the list was first drawn rises into place (tm-rise); the rows there at the start just are.
+  const [fresh] = useState(() => seenRows.size > 0 && !seenRows.has(r.sid));
+  useEffect(() => void seenRows.add(r.sid), [r.sid]);
   const ref = useRef<HTMLDivElement>(null);
   // The open session is scrolled into view when it changes, so the list always shows where you are.
   useEffect(() => {
@@ -2460,6 +2613,8 @@ function ChatRow({
       data-unread={unread || undefined}
       data-menu={menuOpen || !!ctx}
       data-picked={picked || undefined}
+      data-fresh={fresh || undefined}
+      data-live={live || undefined}
       role="button"
       tabIndex={0}
       aria-current={active ? "page" : undefined}
@@ -2499,7 +2654,7 @@ function ChatRow({
         {/* How it stands, first and a size up, in a slot of its own so every name starts in one column (Arun, 2026-11-19: "the
             ring status too the placement of it ... make it slightly bigger"). */}
         <span className="sb-lead" aria-hidden={renaming || undefined}>
-          {!renaming && <SessionRing state={state} crew={crew} working={working} unread={unread} stopped={needs?.kind === "stopped"} quiet={quietRing} title={needs ? `${needs.kind === "stopped" ? "" : "Needs you: "}${shortPaths(needs.detail ?? needs.text)}` : working ? `Working now: ${working.what}` : undefined} />}
+          {!renaming && <SessionRing idleRing state={state} crew={crew} working={working} unread={unread} stopped={needs?.kind === "stopped"} quiet={quietRing} title={needs ? `${needs.kind === "stopped" ? "" : "Needs you: "}${shortPaths(needs.detail ?? needs.text)}` : working ? `Working now: ${working.what}` : undefined} />}
         </span>
         {/* The whole title line up to the time, opened at the name's start with the caret at its end (audit CODE-25, Arun 2026-11-04:
             a 135px field in a 260px row, scrolled to "tor the pricing table"). */}
@@ -2513,9 +2668,15 @@ function ChatRow({
             pointer passes (Arun, 2026-11-04: "the tab shouldnt change in size"). */}
         {(
         <span className="sb-row-end">
-          <span className="dass-row-time shrink-0 text-[12px] tabular-nums text-[var(--text-muted)]" title={since && !quiet ? stateFor(needs || short ? "needs" : working ? "working" : "done", relTime(since)) : `Opened ${relTime(r.openedAt) === "now" ? "just now" : `${relTime(r.openedAt)} ago`}`}>
+          {/* At work: how long, counting up every second on the sidebar's one shared clock (presence.tsx LiveClock), where it said
+              "now" for a minute and then moved a minute at a time (spec 13, "Where it sits still" 1). */}
+          {live ? (
+            <LiveClock className="dass-row-time sb-row-clock shrink-0 text-[12px] tabular-nums text-[var(--text-muted)]" since={working!.startedAt ?? since ?? r.openedAt} title={`Working since ${new Date(working!.startedAt ?? since ?? r.openedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`} />
+          ) : (
+          <span className="dass-row-time shrink-0 text-[12px] tabular-nums text-[var(--text-muted)]" title={since && !quiet ? stateFor(needs || short ? "needs" : working ? "working" : "done", relTime(since), endWord(crew)) : `Opened ${relTime(r.openedAt) === "now" ? "just now" : `${relTime(r.openedAt)} ago`}`}>
             {relTime(since && !quiet ? since : r.openedAt)}
           </span>
+          )}
           {!renaming && <span className="dass-row-act shrink-0">
             <button
               type="button"
@@ -2538,11 +2699,35 @@ function ChatRow({
           {quiet ? (
             <span className="truncate text-[var(--text-muted)]">{quiet}</span>
           ) : needs ? (
-            // A stopped run says who stopped and how, from what happened (audit CODE-4: "Claude Code stopped with an error").
-            <span className="truncate sb-row-asks">{withCode(shortPaths(needs.kind === "stopped" ? `${stopper(crew, needs)} ${lowerWord(needs.text)}` : isRawError(needs.text) ? "Needs you" : needs.text))}</span>
+            needs.kind === "stopped" ? (
+              // A stopped run says who stopped and how, from what happened (audit CODE-4: "Claude Code stopped with an error"), in red.
+              <span className="truncate sb-row-asks sb-row-stopped">{withCode(shortPaths(`${stopper(crew, needs)} ${lowerWord(needs.text)}`))}</span>
+            ) : (
+              // Waiting on you: what it asks, after "Asks" in amber (working-clock audit, 2026-11-21).
+              <span className="truncate sb-row-asks">{asksLine(needs)}</span>
+            )
           ) : compact && !short ? null : crew && (short || crew.agents.some((x) => x.state === "failed")) ? (
             // An agent stopped on an error or short of its plan: that, in its own words, before where it works.
             <CrewLine crew={crew} now={now} />
+          ) : live && crew ? (
+            // At work: the step under way, shining, in place of where it works (spec 13: only a row that's working or asking swaps
+            // the folder line; Arun chose folder · branch for the rest, 2026-11-19).
+            <CrewLine crew={crew} now={now} />
+          ) : prLine ? (
+            // Finished with a pull request: "PR #42 · checks pass", its agents' marks at the end.
+            <span className="sb-where sb-pr-line" title={prUrl}>
+              <Icon name="gitPullRequest" size={12} className="sb-where-icon" />
+              <span className="sb-where-name truncate">PR #{prLine.number}</span>
+              <span className={`sb-pr-state truncate${prLine.tone ? ` ${prLine.tone}` : ""}`}>
+                <span className="sb-row-dot">· </span>
+                {prLine.words}
+              </span>
+              {crew && crew.agents.length > 0 && (
+                <span className="sb-where-end">
+                  <CrewTools className="sb-where-tools" agents={crew.agents.map((x) => ({ key: x.lane, tool: x.tool, face: x.face }))} names={crew.agents.map((x) => agentWord(x.name.replace(/^[^']+'s /, ""), x.tool))} label={crew.agents.map((x) => `${agentWord(x.name.replace(/^[^']+'s /, ""), x.tool)}: ${x.word}`).join(", ")} />
+                </span>
+              )}
+            </span>
           ) : place.folder || place.branch || facts?.files ? (
             // Where it works and how big its change is, not the last thing said (Arun, 2026-11-19: "getting rid of the last
             // message, and replacing with like the repo or folder"; "Changes on the row").

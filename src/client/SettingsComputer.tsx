@@ -81,8 +81,7 @@ export function ComputerSection({ identity, part = "this" }: { identity: Identit
         {/* Computer use is under Agents › Permissions now: what agents may do, not what the computer is. */}
       </SettingsGroup>
       {/* Where new sessions start: this computer, or a machine of yours that stays on, so agents keep running when this one shuts. */}
-      {/* Your phone: in Arun's own build only while the open-source phone app isn't out (Arun, 2026-11-04: "WE DONT HAVE AN APP FOR
-          OPEN SOURCE YET SO GET RID OF IT"; back 2026-11-12 for the app's phase 1, "this is for the open source build"). */}
+      {/* Your phone is Settings › Phone now, a section of its own (2026-11-24). */}
       {/* Your other computers are their own tab (Computers › Other computers), and GitHub is under Connections. */}
       {!isLocal() && <Facts className="px-0.5" items={[{ term: "Friday's agent", detail: "Works in folders this computer lends it, with the files, terminal and preview shown in the session." }]} />}
     </section>

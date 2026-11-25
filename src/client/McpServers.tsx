@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { PageHeader } from "@/components/dass";
+import { EmptyState, PageHeader } from "@/components/dass";
+import { CircleAlertIcon } from "lucide-react";
 import { ClaudeMark } from "./BrandMarks.js";
 import { Icon } from "./icons.js";
 import { hostApi } from "./local.js";
@@ -27,15 +28,56 @@ const call = <T,>(identity: Identity, op: string, body?: unknown) =>
 export function McpServersPage({ identity, tabs }: { identity: Identity; /** Customize's tabs, at the toolbar's left (App.tsx). */ tabs?: ReactNode }) {
   const [list, setList] = useState<List | null>(null);
   const [failed, setFailed] = useState("");
+  const [trying, setTrying] = useState(false);
   const load = useCallback(
     () =>
       call<List>(identity, "connections").then(
         (l) => (setList(l), setFailed(""), l.servers),
-        (e: Error) => (setFailed(e.message), [] as ConnectionView[]),
+        (e: Error) => (setFailed(e.message || "Friday didn't say why."), [] as ConnectionView[]),
       ),
     [identity],
   );
   useEffect(() => void load(), [load]);
+  // Back on the page from a terminal or a coding tool, where a server may have been added or signed in: what changed shows, as
+  // Skills reads its folders again (Skills.tsx).
+  useEffect(() => {
+    const again = () => document.visibilityState === "visible" && void load();
+    document.addEventListener("visibilitychange", again);
+    return () => document.removeEventListener("visibilitychange", again);
+  }, [load]);
+  const retry = () => {
+    setTrying(true);
+    void load().finally(() => setTrying(false));
+  };
+  // Why it couldn't be read, and a way to ask again. Before the list was ever read, in the cards' place; after, over the cards the
+  // page already has, which stay as they were.
+  const trouble = failed ? (
+    list ? (
+      <div className="msv-stale" role="alert">
+        <CircleAlertIcon className="size-3.5 shrink-0" />
+        <span>
+          Couldn't read your plugins again: {failed} What's shown is from before.
+        </span>
+        <Button type="button" variant="outline" size="xs" disabled={trying} onClick={retry}>
+          {trying ? "Trying…" : "Try again"}
+        </Button>
+      </div>
+    ) : (
+      <EmptyState
+        className="msv-failed"
+        tone="bad"
+        icon={<CircleAlertIcon />}
+        title="Couldn't read your plugins"
+        action={
+          <Button type="button" variant="outline" size="sm" disabled={trying} onClick={retry}>
+            {trying ? "Trying…" : "Try again"}
+          </Button>
+        }
+      >
+        <span role="alert">{failed}</span>
+      </EmptyState>
+    )
+  ) : undefined;
   return (
     <div className="page conns-page msv-page px-6! max-[640px]:px-4!">
       <div className="page-inner">
@@ -44,9 +86,10 @@ export function McpServersPage({ identity, tabs }: { identity: Identity; /** Cus
         <div className="msv">
           <Directory
             identity={identity}
-            servers={list?.servers ?? []}
+            servers={list?.servers ?? null}
             builtInApps={list?.builtInApps ?? []}
             onChanged={load}
+            trouble={trouble}
             actions={
               <>
                 <CustomServer identity={identity} servers={list?.servers ?? []} onAdded={() => void load()} />
@@ -54,11 +97,6 @@ export function McpServersPage({ identity, tabs }: { identity: Identity; /** Cus
               </>
             }
           />
-          {failed && (
-            <p className="msv-error" role="alert">
-              Couldn't read your plugins: {failed}
-            </p>
-          )}
         </div>
       </div>
     </div>

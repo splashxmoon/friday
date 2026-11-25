@@ -39,6 +39,7 @@ import {
 import { chime, doneChime } from "./chime.js";
 import { applyFonts, applyTheme, FRIDAY_PALETTES, forgetTheme, keepTheme, PRESETS, readFonts, readTheme, readThemeFile, savedThemes, themeFile, themeFromPalette, type CustomTheme, type Fonts, type Palette } from "./theme.js";
 import { Icon } from "./icons.js";
+import { Skeleton } from "./ui.js";
 import { DownloadIcon, ExternalLinkIcon, UploadIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +47,9 @@ import { Switch } from "@/components/ui/switch";
 import { chooseLimitAlerts, limitAlertsOn } from "./limitHistory.js";
 import { Choice, dangerOutline, Note, SettingsGroup, SettingsRow as Row, StateBadge } from "@/components/dass";
 import { sendFeedback } from "./feedback.js";
+import { healthRows } from "./health-line.js";
+import { openSettings } from "./openSettings.js";
+import type { Health } from "../diagnostics.js";
 import { UsageSharingSetting } from "./UsageSharing.js";
 
 /**
@@ -835,6 +839,178 @@ function ShareAnalytics() {
 // The website's changelog, written for people, not GitHub's list of installers (Arun, 2026-11-05).
 const RELEASES = "https://www.tryfridaywork.com/changelog";
 
+/**
+ * Something broke and you want to say so (spec 13; Arun, 2026-11-24: "Go all out and fix these problems"): Copy diagnostics puts
+ * which Friday, which system, how it's doing and the last of its log on the clipboard, redacted on the computer before it leaves
+ * the server (diagnostics.ts); Show log file opens the folder it's in, from the desktop app. The open-source edition only: its
+ * log is on this computer.
+ */
+function DiagnosticsGroup() {
+  const desk = (window as { fridayDesktop?: { openIn?(target: string, path: string): Promise<{ ok: boolean; error?: string }> } }).fridayDesktop;
+  // Where the log is: as it is, to show it, and as it is said (from ~, by the server, which knows the home folder).
+  const [log, setLog] = useState<{ logFile: string; shown: string; exists: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    fetch("/api/local/diagnostics?path=1", { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { logFile?: string; shown?: string; exists?: boolean } | null) => live && b?.logFile && setLog({ logFile: b.logFile, shown: b.shown || b.logFile, exists: !!b.exists }))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+  const copy = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await fetch("/api/local/diagnostics", { credentials: "same-origin" }).catch(() => null);
+      const b = ((await r?.json().catch(() => null)) ?? {}) as { text?: string; error?: string; logFile?: string; shown?: string };
+      if (!r?.ok || !b.text) throw new Error(b.error || "The diagnostics couldn't be gathered. Try again.");
+      if (b.logFile) setLog({ logFile: b.logFile, shown: b.shown || b.logFile, exists: true });
+      await navigator.clipboard.writeText(b.text).catch(() => {
+        throw new Error("Couldn't copy to the clipboard. Try again.");
+      });
+      window.dispatchEvent(new CustomEvent("friday:notice", { detail: "Copied" }));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const show = async () => {
+    if (!log || !desk?.openIn) return;
+    setError("");
+    const r = await desk.openIn("files", log.logFile).catch((e: Error) => ({ ok: false, error: e.message }));
+    if (!r.ok) setError(r.error || "The log file couldn't be shown.");
+  };
+  return (
+    <>
+      <SettingsGroup title="Diagnostics">
+        <Row label="Copy diagnostics" hint="Your version, system and Friday's recent log, to paste into a bug report. Keys, tokens and file contents are left out.">
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => void copy()}>
+            {busy ? <span className="spinner" aria-hidden="true" /> : <Icon name="copy" size={13} />}
+            Copy diagnostics
+          </Button>
+        </Row>
+        <Row
+          label="Log file"
+          hint={
+            log ? (
+              <>
+                <code className="break-all">{log.shown}</code>
+                {log.exists ? "" : " · Nothing logged yet."}
+              </>
+            ) : (
+              <Skeleton w={220} h={12} r={4} />
+            )
+          }
+        >
+          {desk?.openIn && (
+            <Button variant="outline" size="sm" disabled={!log?.exists} onClick={() => void show()}>
+              Show log file
+            </Button>
+          )}
+        </Row>
+      </SettingsGroup>
+      <Note ok={false}>{error}</Note>
+    </>
+  );
+}
+
+/** How often Health is read again while it is on screen and the window is in sight. */
+const HEALTH_EVERY_MS = 10_000;
+
+/**
+ * Health (spec 13 Wave 4; Arun, 2026-11-24: "Go all out and fix these problems"): the last save, the disk's free space, the data
+ * folder's size, the log's size and this week's errors, each with its plain fix when it's off (health-line.ts). Read again every
+ * ten seconds while it is on screen and the window is in sight, and as the window comes back; grey placeholders until the first
+ * read, and Try again when it couldn't be read. The open-source edition only: it is this computer's.
+ */
+function HealthGroup() {
+  const [h, setH] = useState<Health | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const live = useRef(true);
+  const read = useRef<() => Promise<void>>(async () => {});
+  read.current = async () => {
+    try {
+      const r = await fetch("/api/local/health", { credentials: "same-origin", signal: AbortSignal.timeout(15_000) });
+      const b = (await r.json().catch(() => ({}))) as Health & { error?: string };
+      if (!r.ok || !b.save) throw new Error(b.error || "Friday's health couldn't be read.");
+      if (!live.current) return;
+      setH(b);
+      setError("");
+    } catch (e) {
+      if (!live.current) return;
+      setError((e as Error).name === "TimeoutError" ? "Friday didn't answer in 15 s." : (e as Error).message || "Friday's health couldn't be read.");
+    }
+  };
+  useEffect(() => {
+    live.current = true;
+    void read.current();
+    const tick = () => document.visibilityState === "visible" && void read.current();
+    const timer = setInterval(tick, HEALTH_EVERY_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      live.current = false;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, []);
+  const again = async () => {
+    setBusy(true);
+    await read.current();
+    setBusy(false);
+  };
+  const rows = h ? healthRows(h) : null;
+  const off = rows?.filter((r) => r.off).length ?? 0;
+  return (
+    <SettingsGroup title="Health" hint={rows && <span className="text-[13px] text-[var(--text-muted)]">{off ? `${off} to look at` : "All good"}</span>}>
+      {error && !rows ? (
+        <Row label="Health couldn't be read" hint={error}>
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => void again()}>
+            {busy && <span className="spinner" aria-hidden="true" />}
+            Try again
+          </Button>
+        </Row>
+      ) : !rows ? (
+        // The shape of what is coming: five rows, each a name and a line.
+        ["Saving", "Disk space", "Data folder", "Log size", "Errors"].map((label) => <Row key={label} label={label} hint={<Skeleton w={label === "Saving" ? 240 : 160} h={12} r={4} />} />)
+      ) : (
+        rows.map((r) => (
+          <Row
+            key={r.id}
+            label={
+              <span className="inline-flex items-center gap-2" data-health={r.id}>
+                {r.label}
+                {r.off && <StateBadge tone={r.off.tone}>{r.off.word}</StateBadge>}
+              </span>
+            }
+            hint={r.text || <Skeleton w={160} h={12} r={4} />}
+          >
+            {r.fix && (
+              <Button variant="outline" size="sm" onClick={() => (r.fix!.to === "storage" ? openSettings("storage") : void sendFeedback())}>
+                {r.fix.label}
+                {r.fix.to === "feedback" && <ExternalLinkIcon />}
+              </Button>
+            )}
+          </Row>
+        ))
+      )}
+      {error && rows && (
+        <Row label="Couldn't read it again" hint={`${error} What's shown is from the last read.`}>
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => void again()}>
+            {busy && <span className="spinner" aria-hidden="true" />}
+            Try again
+          </Button>
+        </Row>
+      )}
+    </SettingsGroup>
+  );
+}
+
 export function AboutTab({ onReplayTour, part = "updates" }: { onReplayTour?: () => void; part?: "updates" | "help" }) {
   // Outside the desktop app (which says its version and updates itself, AppUpdate) the version is the server's own: the page
   // said "Updates" and showed none (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
@@ -868,6 +1044,8 @@ export function AboutTab({ onReplayTour, part = "updates" }: { onReplayTour?: ()
             </Button>
           </Row>
         </SettingsGroup>
+        {isLocal() && <HealthGroup />}
+        {isLocal() && <DiagnosticsGroup />}
       </section>
     );
   return (

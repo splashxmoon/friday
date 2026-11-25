@@ -32,6 +32,9 @@ import { loopBetween } from "./team-away.js";
 import { SKILL_TOOLS } from "./team-skills.js";
 import { proofText, taskProof } from "./team-proof.js";
 import { keepProofShot, postProof, PROOF_TOOL } from "./team-proof-tool.js";
+
+/** How long one of Friday's tools may have been waiting before a message handed to the agent's turn stops it (AgentMesh.giveWay). */
+export const GIVE_WAY_MS = 20_000;
 export { meshHead } from "./mesh-note.js";
 
 /**
@@ -762,7 +765,7 @@ export function relatedThreads(me: SessionState, near: readonly { s: SessionStat
   const mine = projectsOf(me);
   if (!mine.size) return [];
   return near
-    .filter(({ s, at }) => s.id !== me.id && now - at < THREAD_ACTIVE_MS && [...projectsOf(s)].some((k) => mine.has(k)))
+    .filter(({ s, at }) => s.id !== me.id && !s.options.manager && now - at < THREAD_ACTIVE_MS && [...projectsOf(s)].some((k) => mine.has(k)))
     .sort((a, b) => b.at - a.at)
     .slice(0, 4);
 }
@@ -789,6 +792,17 @@ export class AgentMesh {
    * true when that is what happened, and the usual hand-on to another agent is skipped. Set by the app.
    */
   teamSwitch: ((sid: string, lane: string) => Promise<boolean>) | null = null;
+  /**
+   * Whether the person paused this room's crew (teammates.ts paused): Friday's own nudges to its lead wait then, rather than pile
+   * up in the room as queued messages (Arun, 2026-11-25: "it shouldnt be keep messaging after pausing"). Set by the app.
+   */
+  crewPaused: ((sid: string) => Promise<boolean>) | null = null;
+  /**
+   * Whether Friday may nudge this room's lead by itself (a stuck board, a mate gone quiet, no file changed): a crew room only while
+   * its person is Away and hasn't paused it (Arun, 2026-11-25: "unless talked to or setup up an automation or something nothing
+   * should be crowding this feed"). Set by the app; unset, it may.
+   */
+  leadNudges: ((sid: string) => Promise<boolean>) | null = null;
   /** The checks people added for the repo a lane works in (brain.ts), run after a board task's own; `ran` counts each run. Set by the app. */
   repoChecks: ((sid: string, lane: string) => Promise<RepoCheck[]>) | null = null;
   /** What a test command came to at the commit a lane's copy started from (app.ts baselineFor, baseline.ts); null when it can't be said. */
@@ -1009,9 +1023,47 @@ export class AgentMesh {
   /** Sessions with a board being worked on, looked at now and then for a task nobody is doing (sweep). */
   readonly live = new Set<string>();
 
+  /** Friday's own tool calls under way, by session and lane, each with when it began: what giveWay stops. */
+  private readonly inFlight = new Map<string, Map<AbortController, { name: string; at: number }>>();
+
+  /**
+   * A message handed to the turn running on `lane` (a steer, engine/hub.ts): any of Friday's own tools it has been waiting on for
+   * `after` or longer stops waiting and says why, so the agent reads the message now rather than when the tool answers (Arun,
+   * 2026-11-24: "ensure long horizon tasks… not getting hung up or stuck"; an agent nineteen minutes into a click that never came
+   * back had its wake and the person's hold delivered to it unread). A quick call isn't cut short. How many gave way.
+   */
+  giveWay(sid: string, lane: string, after = GIVE_WAY_MS): number {
+    const calls = this.inFlight.get(`${sid}|${lane}`);
+    let n = 0;
+    for (const [ac, c] of calls ?? []) {
+      if (Date.now() - c.at < after || ac.signal.aborted) continue;
+      ac.abort(`A message came for you while ${c.name} was still waiting, so Friday stopped waiting on it. Read the message first, then carry on; call ${c.name} again if you still need it.`);
+      n++;
+    }
+    return n;
+  }
+
   /** One of MESH_TOOLS, called by the agent on `lane`. Never throws: a failure is the tool's answer. */
   async call(sid: string, lane: string, name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<MeshResult> {
-    const r = await this.callOne(sid, lane, name, args, signal);
+    const key = `${sid}|${lane}`;
+    const ac = new AbortController();
+    const relay = () => ac.abort(signal?.reason);
+    if (signal?.aborted) relay();
+    else signal?.addEventListener("abort", relay, { once: true });
+    let calls = this.inFlight.get(key);
+    if (!calls) this.inFlight.set(key, (calls = new Map()));
+    calls.set(ac, { name, at: Date.now() });
+    let r: MeshResult;
+    try {
+      // Stopped (the agent's own call cancelled, or giving way to a message): answered at once with why; whatever the tool was
+      // waiting on finishes or not on its own, unheard.
+      const stopped = new Promise<MeshResult>((resolve) => ac.signal.addEventListener("abort", () => resolve({ output: typeof ac.signal.reason === "string" ? ac.signal.reason : "Stopped.", isError: true }), { once: true }));
+      r = await Promise.race([this.callOne(sid, lane, name, args, ac.signal), stopped]);
+    } finally {
+      calls.delete(ac);
+      if (!calls.size) this.inFlight.delete(key);
+      signal?.removeEventListener("abort", relay);
+    }
     // The open line: whatever an agent asks Friday, it hears that something is waiting for it, so a message to a busy agent
     // reaches it mid-work instead of only when its turn ends.
     if (name === "check_messages" || name === "list_agents" || r.endTurn) return r;
@@ -2312,8 +2364,7 @@ Work to this from here.`, kind: "tell", system: true }).catch(() => undefined);
         const last = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane);
         const key = `${sid}|${t.id}|${last?.seq ?? 0}`;
         if (last && now - last.ts >= QUIET_RUN_MS && !this.quietTold.has(key)) {
-          this.quietTold.set(key, now);
-          await this.tellLead(sid, `${name} took "${t.title}" ${span(now - (events.find((e) => e.body.type === "board.claimed" && e.body.id === t.id)?.ts ?? last.ts))} ago and hasn't done anything for ${span(now - last.ts)}. Check on it with message_agent, or if it's stuck, tell the person here so they can stop it and the task can go to someone else.`);
+          if (await this.tellLead(sid, `${name} took "${t.title}" ${span(now - (events.find((e) => e.body.type === "board.claimed" && e.body.id === t.id)?.ts ?? last.ts))} ago and hasn't done anything for ${span(now - last.ts)}. Check on it with message_agent, or if it's stuck, tell the person here so they can stop it and the task can go to someone else.`)) this.quietTold.set(key, now);
         }
         // Busy all along, but no file changed for TASK_CAP_MS: a turn spending usage on nothing. The lead hears it once (2026-10-28
         // audit: a night's usage went on one task that never changed a file).
@@ -2322,8 +2373,7 @@ Work to this from here.`, kind: "tell", system: true }).catch(() => undefined);
         const since = changed?.ts ?? took?.ts ?? now;
         const capKey = `${sid}|${t.id}|cap|${changed?.seq ?? 0}`;
         if (now - since >= TASK_CAP_MS && !this.quietTold.has(capKey)) {
-          this.quietTold.set(capKey, now);
-          await this.tellLead(sid, `${name} has been on "${t.title}" for ${span(now - (took?.ts ?? since))} without changing a file for ${span(now - since)}. Check on it (message_agent), split the task, or ${this.boardFix}, rather than let it spend more on it.`);
+          if (await this.tellLead(sid, `${name} has been on "${t.title}" for ${span(now - (took?.ts ?? since))} without changing a file for ${span(now - since)}. Check on it (message_agent), split the task, or ${this.boardFix}, rather than let it spend more on it.`)) this.quietTold.set(capKey, now);
         }
         continue;
       }
@@ -2355,17 +2405,21 @@ Work to this from here.`, kind: "tell", system: true }).catch(() => undefined);
     const state = await this.store.state(sid);
     const b = state.board;
     if (!b || !boardBusy(state)) return;
-    // Held by a person: waiting is what they asked for, not the board being stuck.
+    // Held by a person, or their crew paused: waiting is what they asked for, not the board being stuck.
     if (b.held) return;
+    if (await this.crewPaused?.(sid).catch(() => false)) return;
     if (b.tasks.some((t) => t.status === "claimed" || t.status === "review")) return;
     if (readyTasks(state).length) return;
     const stuck = b.tasks.filter((t) => t.status === "blocked" || t.status === "cancelled");
     const waiting = b.tasks.filter((t) => t.status === "open" && !t.held);
     if (!waiting.length) return;
-    const key = `${sid}|wedged|${b.seq}|${waiting.map((t) => t.id).join(",")}|${stuck.map((t) => t.id).join(",")}`;
+    // Once for each way it is stuck: which tasks wait and which are stuck, not the board's count of changes, which its own report moves
+    // (so it was said again at every sweep: "The board is stuck" twenty times over a paused night).
+    const key = `${sid}|wedged|${waiting.map((t) => t.id).join(",")}|${stuck.map((t) => t.id).join(",")}`;
     if (this.quietTold.has(key)) return;
-    this.quietTold.set(key, now);
     const on = (t: BoardTask) => t.after.filter((d) => stuck.some((x) => x.id === d));
+    if (this.leadNudges && !(await this.leadNudges(sid).catch(() => false))) return;
+    this.quietTold.set(key, now);
     await this.reportBoard(sid, true);
     await this.tellLead(sid, `The board is stuck: ${waiting.map((t) => `"${t.id}" waits on ${on(t).map((d) => `"${d}"`).join(", ") || "tasks that can't finish"}`).join("; ")}, and ${stuck.map((t) => `"${t.id}" is ${t.status === "blocked" ? "stuck" : "dropped"}`).join(", ") || "nothing else can move"}. ${this.boardFix[0]!.toUpperCase()}${this.boardFix.slice(1)}.`);
   }
@@ -2750,12 +2804,18 @@ Work to this from here.`, kind: "tell", system: true }).catch(() => undefined);
   }
 
   /** A word from Friday to the agent that posted the board, about how its work is going. */
-  private async tellLead(sid: string, text: string): Promise<void> {
+  private async tellLead(sid: string, text: string): Promise<boolean> {
     const b = (await this.store.state(sid)).board;
-    if (!b) return;
+    if (!b) return false;
+    // Only when the room runs on its own, and never the same words twice in a day: read from the room's own log, so a restart
+    // doesn't say it again (it was said after every restart: four times in half an hour of installs).
+    if (this.leadNudges && !(await this.leadNudges(sid).catch(() => false))) return false;
+    const since = Date.now() - 86_400_000;
+    if ((await this.store.events(sid)).some((e) => e.ts > since && (e.lane ?? MAIN_LANE) === b.fromLane && e.body.type === "instruction" && e.body.text === text && e.actor.name === "Friday")) return true;
     const mesh: MeshNote = { id: randomBytes(5).toString("hex"), kind: "tell", fromLane: b.fromLane, fromName: "Friday", toName: b.fromName, hop: 1, by: null };
     const sent = await this.store.append(sid, agentActor("Friday"), { type: "instruction", text, interrupt: false, mesh }, { lane: b.fromLane });
     if (sent.ok) void this.bus.wake(sid, b.fromLane);
+    return sent.ok;
   }
 
   /** What is waiting for the agent on `lane`: messages queued for it, team updates it hasn't read, files it shares with another agent. */

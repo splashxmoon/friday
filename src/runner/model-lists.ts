@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { EngineTool } from "../types.js";
-import { ADAPTERS, childEnv, findBin, launcher, modelMenu, piModelList, runCli, toolEnv, type TurnSpec } from "./adapters.js";
+import { ADAPTERS, childEnv, findBin, launcher, modelMenu, piModelList, runCli, type TurnSpec } from "./adapters.js";
 import { spawnCli } from "./spawn-cli.js";
 
 /**
@@ -67,7 +67,7 @@ export function listModels(tool: EngineTool): Promise<ListedModel[]> {
 async function piModels(bin: string): Promise<ListedModel[]> {
   await mkdir(PROBE_DIR, { recursive: true });
   const how = await launcher(bin);
-  const child = spawnCli(how.command, [...how.prefix, "--mode", "rpc", "--no-session", "--offline"], { cwd: PROBE_DIR, env: toolEnv("pi", { ...childEnv(), ...how.env, PI_SKIP_VERSION_CHECK: "1" }) });
+  const child = spawnCli(how.command, [...how.prefix, "--mode", "rpc", "--no-session", "--offline"], { cwd: PROBE_DIR, env: { ...childEnv(), ...how.env, PI_SKIP_VERSION_CHECK: "1" } });
   return new Promise((resolve) => {
     let buf = "";
     let done = false;
@@ -141,7 +141,7 @@ export async function openConversation(tool: EngineTool, bin: string, timeoutMs 
   await mkdir(PROBE_DIR, { recursive: true });
   const turn: TurnSpec = { prompt: "", system: "", resumeId: null, mode: "plan", ask: true };
   const how = await launcher(bin);
-  const child = spawnCli(how.command, [...how.prefix, ...a.args(turn)], { cwd: PROBE_DIR, env: toolEnv(tool, { ...childEnv(), ...how.env, ...(a.env?.(turn) ?? {}) }) });
+  const child = spawnCli(how.command, [...how.prefix, ...a.args(turn)], { cwd: PROBE_DIR, env: { ...childEnv(), ...how.env, ...(a.env?.(turn) ?? {}) } });
   return new Promise((resolve) => {
     let buf = "";
     let done = false;

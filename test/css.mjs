@@ -9,6 +9,11 @@ import path from "node:path";
 // where left 213 folders there on one computer (Arun, 2026-11-19, storage). Every test process loads this file; a test that
 // sets FRIDAY_WORKTREES itself still decides.
 if (!process.env.FRIDAY_WORKTREES) process.env.FRIDAY_WORKTREES = mkdtempSync(path.join(tmpdir(), "friday-test-copies-"));
+// Nor the Friday folder of whoever runs them. Run from inside Friday, FRIDAY_HOME is set, and it wins over HOME for the trash,
+// skills, storage and the IDE (ide.ts, skill-library.ts, storage.ts): a test that gave itself a HOME of its own still reached the
+// real folder (test/ide-git.test.ts discarded into the real trash). Dropped here, a test's HOME decides, as from a terminal; a
+// test that sets FRIDAY_HOME itself still does.
+delete process.env.FRIDAY_HOME;
 
 register(
   "data:text/javascript," +

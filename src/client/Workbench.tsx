@@ -1,5 +1,6 @@
 import { iosFolders } from "./ios-folders.js";
 import { dragEnds } from "./drag-end.js";
+import { WithPatches } from "./patchSource.js";
 import { Activity as Keep, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { mateOn, openThread, ThreadInPanel, useOpenThread } from "./Teammates.js";
 import { ALL, useFocusedAgent } from "./agentFocus.js";
@@ -1075,13 +1076,22 @@ export function Workbench({
       );
     if (which === "usage") return <UsagePanel state={state} events={events} identity={identity} solo={headless || isLocal()} />;
     if (which === "rules") return <RulesPanel state={state} sid={sid} invite={invite} me={me} send={send} {...(lane ? { lane } : {})} />;
-    if (which === "tree") return <TreePanel state={state} events={laneEvents} {...(lane ? { lane } : {})} sid={sid} invite={invite} onClose={onClose} bare send={send} me={me} jump={jump} />;
+    if (which === "tree")
+      return (
+        <WithPatches sid={sid} invite={invite}>
+          <TreePanel state={state} events={laneEvents} {...(lane ? { lane } : {})} sid={sid} invite={invite} onClose={onClose} bare send={send} me={me} jump={jump} />
+        </WithPatches>
+      );
     if (which === "files" || which === "git")
       return (
         <ChangesPanel
           sid={sid}
           count={badges?.files ?? 0}
-          agents={<FilesPanel state={state} events={events} {...(lane ? { lane } : {})} onClose={onClose} bare ship={{ me, sid, invite, send }} />}
+          agents={
+            <WithPatches sid={sid} invite={invite}>
+              <FilesPanel state={state} events={events} {...(lane ? { lane } : {})} onClose={onClose} bare ship={{ me, sid, invite, send }} />
+            </WithPatches>
+          }
           git={<GitPanel state={state} sid={sid} invite={invite} send={send} me={me} {...(lane ? { lane } : {})} />}
         />
       );

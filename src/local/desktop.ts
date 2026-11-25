@@ -7,11 +7,14 @@ import { execFile } from "node:child_process";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, session, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, powerMonitor, session, shell, systemPreferences } from "electron";
 import { powerSaveBlocker } from "electron";
 import { MAC_CSS, THEME_WATCH, WIN_CSS } from "../desktop-chrome.js";
 import { registerNative } from "../desktop-native.js";
 import { feedbackUrl, osName } from "../feedback.js";
+import { defaultHome, diagnostics, installProcessLog, logLine, logPath, processLog } from "../diagnostics.js";
+import { bootPage, bootPageUrl } from "./boot-page.js";
+import { CrashGuard, errorPage, errorPageUrl, goneWords } from "./crash-recovery.js";
 import { registerBrowser } from "./desktop-browser.js";
 import { registerTray } from "./desktop-tray.js";
 import { registerScreen } from "../desktop-screen.js";
@@ -28,6 +31,12 @@ import { useInProcessCapture } from "../runner/screenshot.js";
 import { VSCODE_HELP, VSCODE_MENUS, type VsMenuItem } from "../vscode-menu.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+/**
+ * This process's log (diagnostics.ts), first of all: the server, runner and store all run in it, and an error in any of them showed
+ * Electron's own dialog with a stack, or nothing, and was written nowhere. Now it is logged to <FRIDAY_HOME>/diagnostics/friday.log
+ * and the app carries on, as the server and the runner do on their own (spec 13; Arun, 2026-11-24: "Go all out and fix these problems").
+ */
+installProcessLog(defaultHome(), { what: "The desktop app" });
 // The page as built ahead (scripts/build-local-desktop.mts), so the app needs no bundler.
 process.env.CLIENT_DIR ||= path.join(here, "client");
 
@@ -51,6 +60,36 @@ const loginPath: Promise<void> =
 
 let friday: Started | null = null;
 let win: BrowserWindow | null = null;
+/** Quitting: the window going isn't a crash to recover from. */
+let quitting = false;
+
+/**
+ * The window's page dying (out of memory on a long log, a GPU fault, the system killing it) left it white with nothing to press:
+ * loaded again at once, three times a minute at most, then a small page of its own with Reload, Copy diagnostics and Show log
+ * file (crash-recovery.ts). Each is logged with its reason.
+ */
+const crashes = new CrashGuard();
+function recoverPage(reason: string, exitCode: number): void {
+  const w = win;
+  if (quitting || !w || w.isDestroyed()) return;
+  logLine(reason === "clean-exit" ? "info" : "error", `The window's page ${goneWords(reason)} (${reason}, exit code ${exitCode})`);
+  const next = crashes.gone(reason);
+  if (next === "none" || !friday) return;
+  if (next === "reload") {
+    logLine("info", `Reloading the window (${crashes.recent} of ${crashes.max} in a minute)`);
+    void w.loadURL(friday.url).catch(() => {});
+    return;
+  }
+  // The error page dying too, again and again: left as it is rather than loaded for ever.
+  if (crashes.recent > crashes.max + 2) return;
+  logLine("error", `The window's page stopped ${crashes.recent} times in a minute: showing the error page`);
+  void w.loadURL(errorPageUrl(errorPage({ reason, times: crashes.max }))).catch(() => {});
+}
+/**
+ * Whether the window shows a page of its own now, the error page or the one shown while Friday starts (boot-page.ts), not the
+ * app's: the error page's buttons are answered for it only, and neither gets the app's header styles or its theme watch.
+ */
+const onErrorPage = (wc: Electron.WebContents) => wc.getURL().startsWith("data:text/html");
 
 // ── Keeping the computer awake while the team works and the person is away ──────────────────────────────────────────────
 //
@@ -195,6 +234,8 @@ function open(url: string) {
   // The product app's window chrome (desktop-chrome.ts): the header band that drags, with the window's buttons in it, and the
   // page laid out below it; and the page's light or dark choice reported back for the window's buttons.
   win.webContents.on("did-finish-load", () => {
+    // Not on the error page: it has no header, and the theme watch would read it as light and turn the whole app light.
+    if (!win || onErrorPage(win.webContents)) return;
     void win?.webContents.insertCSS(process.platform === "darwin" ? MAC_CSS : WIN_CSS);
     void win?.webContents.executeJavaScript(THEME_WATCH).catch(() => {});
   });
@@ -223,6 +264,10 @@ function open(url: string) {
     const f = e.frame;
     if (f && (f.url === "about:srcdoc" || f.origin === "null")) e.preventDefault();
   });
+  win.webContents.on("render-process-gone", (_e, d) => recoverPage(d.reason, d.exitCode));
+  // A page stuck (a long synchronous render): said in the log, so a hang someone reports can be seen there.
+  win.on("unresponsive", () => logLine("warn", "The window stopped responding"));
+  win.on("responsive", () => logLine("info", "The window is responding again"));
   win.on("closed", () => (win = null));
   void win.loadURL(url);
 }
@@ -299,7 +344,21 @@ async function begin(): Promise<boolean> {
     useInProcessCapture({ capture: (shot) => capturePreview(shot), clip: (ask) => recordClip(ask) });
     friday = await startLocal({ atComputer: () => powerMonitor.getSystemIdleTime() < 120 });
   } catch (e) {
-    dialog.showErrorBox("Friday couldn't start", e instanceof Error ? e.message : String(e));
+    console.error("[friday] couldn't start:", e instanceof Error ? (e.stack ?? e.message) : e);
+    await processLog()?.flush();
+    // The window showing Friday starting goes, so what is said is said over nothing that looks stuck.
+    if (win && !win.isDestroyed()) win.hide();
+    // Another Friday already holds this data folder (start.ts friday.lock): said as that, not as a failure, since both writing one
+    // folder is what lost work before (spec 13).
+    if ((e as { code?: string } | null)?.code === "FRIDAY_ALREADY_OPEN") {
+      const other = e as { home: string; pid: number };
+      await dialog.showMessageBox({
+        type: "info",
+        message: "Friday is already open",
+        detail: `Another Friday is using the same data (${other.home}, process ${other.pid}). Close it, then open this one again.`,
+        buttons: ["OK"],
+      });
+    } else dialog.showErrorBox("Friday couldn't start", e instanceof Error ? e.message : String(e));
     app.exit(1);
     return false;
   }
@@ -349,6 +408,38 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   // Whether the window is in full screen, asked once by the page as it starts (preload.ts onFullScreen); open() says when it changes.
   ipcMain.handle("friday:is-full-screen", (e) => e.sender === win?.webContents && !!win?.isFullScreen());
+  // The error page's buttons (crash-recovery.ts), for that page in Friday's window only. Copy diagnostics asks Friday's server, which
+  // runs in this process and is still up when only the page died; if it doesn't answer, the same report is made here without it.
+  ipcMain.handle("friday:recover", async (e, what: unknown): Promise<{ ok: boolean; error?: string }> => {
+    const w = win;
+    if (!w || w.isDestroyed() || e.sender !== w.webContents || !onErrorPage(w.webContents)) return { ok: false, error: "Not from Friday's window." };
+    if (what === "reload") {
+      if (!friday) return { ok: false, error: "Friday isn't running. Quit and open it again." };
+      crashes.reset();
+      logLine("info", "Reloading the window from the error page");
+      void w.loadURL(friday.url).catch(() => {});
+      return { ok: true };
+    }
+    if (what === "copy") {
+      const asked = friday
+        ? await fetch(`${friday.url}/api/local/diagnostics`, { signal: AbortSignal.timeout(10_000) })
+            .then((r) => r.json() as Promise<{ text?: string }>)
+            .catch(() => null)
+        : null;
+      const text = asked?.text ?? (await diagnostics({ home: defaultHome(), version: app.getVersion() }).then((d) => d.text, () => ""));
+      if (!text) return { ok: false, error: "The diagnostics couldn't be gathered." };
+      clipboard.writeText(text);
+      return { ok: true };
+    }
+    if (what === "log") {
+      await processLog()?.flush();
+      shell.showItemInFolder(logPath(defaultHome()));
+      return { ok: true };
+    }
+    return { ok: false, error: "Not something this page does." };
+  });
+  // Another of the app's processes going (the GPU's, a utility's): logged, so a window that went blank or slow has a reason on record.
+  app.on("child-process-gone", (_e, d) => logLine(d.reason === "clean-exit" ? "info" : "warn", `The app's ${d.name || d.type} process ${goneWords(d.reason)} (${d.reason}, exit code ${d.exitCode})`));
   // Choosing where a coding agent works, in the system's own folder picker: all the page gets back is the path chosen.
   ipcMain.handle("friday:pick-folder", async (e) => {
     if (!win || !fromApp(e)) return null;
@@ -390,12 +481,12 @@ else {
     trusted: fromApp,
   });
   // A thread asked for from outside the window (window-opener.ts: Slack's Open in Friday): the window comes forward on it.
-  setWindowOpener((sid) => {
+  setWindowOpener((sid, invite) => {
     if (!friday) return false;
     open(friday.url);
     if (!win || win.isDestroyed()) return false;
     const main = win;
-    const go = () => void main.webContents.executeJavaScript(`dispatchEvent(new CustomEvent("friday:open-session", { detail: ${JSON.stringify({ sid: sid.slice(0, 80) })} }))`).catch(() => {});
+    const go = () => void main.webContents.executeJavaScript(`dispatchEvent(new CustomEvent("friday:open-session", { detail: ${JSON.stringify({ sid: sid.slice(0, 80), ...(invite ? { invite: invite.slice(0, 2000) } : {}) })} }))`).catch(() => {});
     if (main.webContents.isLoading()) main.webContents.once("did-finish-load", go);
     else go();
     return true;
@@ -463,16 +554,34 @@ else {
     if (!win || e.sender !== win.webContents) return;
     setMenus(on === true, Array.isArray(recent) ? recent.filter((p): p is string => typeof p === "string" && p.length < 2000).slice(0, 10) : []);
   });
-  app.on("second-instance", () => friday && open(friday.url));
+  app.on("second-instance", () => {
+    if (friday) return open(friday.url);
+    // Still starting: the window that shows it comes forward.
+    if (win && !win.isDestroyed()) (win.show(), win.focus());
+  });
   app.whenReady().then(async () => {
     // Help › Send feedback: a GitHub issue started with this version and system (feedback.ts), in the person's own browser.
     setMenus(false);
     lockPreview();
     allowMicrophone();
     keepCachesSmall();
+    // The window at once, showing Friday starting in its own look (boot-page.ts), and the app in it the moment the server answers:
+    // it opened only once the whole server had started, half a second with a long history (spec 13, Arun 2026-11-24: "Go all out
+    // and fix these problems"). The server listens before it brings back what was going (start.ts restored), so that is soon.
+    open(bootPageUrl(bootPage({ theme: lastTheme(), glass: lastGlass() && GLASS_NATIVE })));
     await loginPath;
     if (!(await begin()) || !friday) return;
-    open(friday.url);
+    if (win && !win.isDestroyed()) void win.loadURL(friday.url).catch(() => {});
+    else open(friday.url);
+    // The computer waking or unlocking: sleep doesn't hide the page, so its sockets looked open to nothing until their next ping, up
+    // to half a minute of "live" over a dead link. Told at once (preload.ts onResume), each open session checks its link now
+    // (client/useSession.ts).
+    const resumed = (why: string) => {
+      logLine("info", `The computer ${why}`);
+      for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send("friday:resume");
+    };
+    powerMonitor.on("resume", () => resumed("woke from sleep"));
+    powerMonitor.on("unlock-screen", () => resumed("was unlocked"));
     tray.start();
     app.on("activate", () => friday && open(friday.url));
     // Updates as the product app has them (desktop-update.ts): checked in the background, downloaded, and offered once ready.
@@ -484,7 +593,6 @@ else {
   // Quitting closes the window first (so it doesn't reload against a server that's going), then Friday, which writes what
   // it keeps, five seconds at most, then exits outright: a second app.quit() from here can be ignored as a quit already
   // under way, and that left the app running with nothing in it.
-  let quitting = false;
   app.on("before-quit", (e) => {
     if (quitting || !friday) return;
     quitting = true;
@@ -492,8 +600,10 @@ else {
     stopTerminals();
     for (const w of BrowserWindow.getAllWindows()) w.destroy();
     // A coding tool still running when the five seconds are up is killed: it would outlive the app (spawn-cli.ts).
-    void Promise.race([friday.close(), new Promise((r) => setTimeout(r, 5000))]).finally(() => {
+    void Promise.race([friday.close(), new Promise((r) => setTimeout(r, 5000))]).finally(async () => {
       killTools();
+      // The log's last lines on disk, half a second at most.
+      await Promise.race([processLog()?.flush(), new Promise((r) => setTimeout(r, 500))]);
       app.exit(0);
     });
   });

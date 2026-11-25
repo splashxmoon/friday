@@ -13,6 +13,9 @@ mkdirSync(home);
 writeFileSync(join(base, "gitconfig"), "");
 process.env.HOME = home;
 process.env.USERPROFILE = home;
+// FRIDAY_HOME wins over HOME for where the trash is (ide.ts), and it is set wherever this runs from inside Friday: left as it
+// is, a discard here would land in that person's real trash, and the test's check of where it went would fail.
+process.env.FRIDAY_HOME = join(home, ".friday");
 process.env.GIT_CONFIG_GLOBAL = join(base, "gitconfig");
 process.env.GIT_CONFIG_NOSYSTEM = "1";
 

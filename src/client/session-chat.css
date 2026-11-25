@@ -85,3 +85,14 @@
 .composer-ask-stop,
 .composer-send .composer-suggest-btn,
 .their-q-opt { border-radius: var(--r-md); }
+
+/* Spec 13, Wave 3 E (Arun, 2026-11-20: "everything needs to feel like a working clock"). */
+/* "Done · unverified" as the way to check it (Activity.tsx CheckBadge): the badge, then Check it beside it; while the check runs the
+   badge turns, and once the tests are in it says how they went, a failure with Fix it. */
+.rsp-check { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 6px; }
+.rsp-check > .rsp-verdict { margin: 0; }
+.rsp-check-note { color: var(--text-muted); font-size: 12px; }
+.rsp-verdict.checking { gap: 6px; color: var(--ink-2); }
+/* Check it and Fix it are Test it's own button (proof-clip-card.css .test-it); Fix it in red. */
+.rsp-check > .test-it { height: 24px; margin: 0; }
+.rsp-check > .test-it.danger { border-color: color-mix(in srgb, var(--red) 45%, transparent); color: var(--red); }

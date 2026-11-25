@@ -1,5 +1,6 @@
 import { useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { stepKind } from "../run-strip.js";
+import { tickEvery } from "./presence.js";
 import { doingVerb, stepsSummary } from "../step-summary.js";
 import { Shine } from "./shine.js";
 import { BrainIcon, CircleDotIcon, EyeIcon, GlobeIcon, MessageCircleQuestionIcon, PencilLineIcon, SearchIcon, SquareTerminalIcon, SquareArrowOutUpRightIcon, UsersIcon } from "lucide-react";
@@ -8,6 +9,7 @@ import { useHeldWords } from "./work-line.js";
 import { Orb } from "@/components/aicss/Orb";
 import { StepList, tookFor, type Step } from "./Response.js";
 import { IdeChatContext } from "./ide/mode.js";
+import { LIVE_WORDS } from "../step-words.js";
 
 /**
  * A reply's work as one line (Arun, 2026-11-14, direction A of the working-state mockups: "instead of having so many of these",
@@ -83,8 +85,8 @@ export function doingKind(blocks: readonly Block[], live: boolean): string {
 function Clock({ since }: { since: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    // The page's one 1-second ticker, shared with every other clock and still while the window is hidden (presence.tsx).
+    return tickEvery(1000, setNow);
   }, []);
   return <span className="rl-clock">{now - since >= 1000 ? tookFor(now - since) : ""}</span>;
 }
@@ -107,7 +109,13 @@ export function RunLine({ blocks, live, since, took, waiting = false, writing = 
   // hover, each step held a moment and risen in, a long think said its other ways (Arun, 2026-11-17: "bring this work line stuff
   // design into the coding sessions... more advanced for the coding session and interactive as well").
   const plainNow = plainStep(blocks, waiting);
-  const word = waiting ? "Waiting for an answer" : running ? plainNow.words : writing ? "Writing the answer" : blocks.at(-1)?.kind === "think" || !steps.length ? "Thinking" : plainNow.words;
+  // Between steps, the words the sidebar's row, the side panel and the board say (step-words.ts LIVE_WORDS, spec 13 polish): writing its
+  // answer, thinking (aloud, or its last step back), or not heard from yet.
+  // Its words streaming beat a step that still looks under way: a model writing has had its steps back, and a step whose result is
+  // never logged (a plan) read "Planning" over its streaming answer until a reload, then "Writing its answer" (2026-11-24 walk).
+  const word = waiting ? "Waiting for an answer" : writing ? LIVE_WORDS.writing : running ? plainNow.words : blocks.at(-1)?.kind === "think" || steps.length ? LIVE_WORDS.thinking : LIVE_WORDS.starting;
+  // Nothing to open yet (a reply only writing): the line is its words and clock alone.
+  const empty = !steps.length && !thinks.length;
   const full = running ? doingOf(running) : word;
   const words = useHeldWords(word, live);
   const opened = group === undefined ? (live && running && !bare ? groupOf(running).key : null) : group;
@@ -138,7 +146,7 @@ export function RunLine({ blocks, live, since, took, waiting = false, writing = 
 
   return (
     <div className={`rl${live ? " live" : ""}${failed && !live ? " has-fail" : ""}${bare ? " bare" : ""}`} data-orb={live && !waiting && !bare ? "" : undefined}>
-      {!bare && <button type="button" className="rl-head" aria-expanded={open} aria-controls={body} onClick={() => setOpen((o) => !o)}>
+      {!bare && <button type="button" className="rl-head" aria-expanded={empty ? undefined : open} aria-controls={empty ? undefined : body} onClick={() => !empty && setOpen((o) => !o)}>
         {/* The same nine-cell grid as the reply's "Thinking" line, so working reads as the same thing moving on. */}
         {live && !waiting && <Orb variant="S3" size={14} label={word} />}
         <span className="rl-text">
@@ -175,9 +183,9 @@ export function RunLine({ blocks, live, since, took, waiting = false, writing = 
         )}
         {live && since !== undefined && !waiting && <Clock since={since} />}
         {live && forecast && <span className="rl-clock">{forecast}</span>}
-        <span className={`rsp-caret side ${open ? "open" : ""}`} aria-hidden />
+        {!empty && <span className={`rsp-caret side ${open ? "open" : ""}`} aria-hidden />}
       </button>}
-      {open && (
+      {open && !empty && (
         <div id={body} className="rl-body">
           {thinks.length > 0 && (
             <div className="rl-group">

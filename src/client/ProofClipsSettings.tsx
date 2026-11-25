@@ -21,8 +21,8 @@ export function ProofClipsSettings({ identity }: { identity: Identity }) {
         label="Record proof clips"
         hint={
           p.on
-            ? "After a change to a page, a few seconds of the app: Friday goes to what changed, points it out and clicks it, and says what was changed, so you see it work before you read the code. Each session can have its own setting, in its menu."
-            : "Off. The preview check still takes its pictures; nothing is recorded."
+            ? "In the IDE's chats: after a change to a page, a few seconds of the app: Friday goes to what changed, points it out and clicks it, and says what was changed, so you see it work before you read the code. Each IDE chat can have its own setting, in its menu. Coding sessions and Crew don't take proof."
+            : "Off. Proof is only ever in the IDE's chats, once turned on here; coding sessions and Crew don't take it. The preview check still takes its pictures."
         }
       >
         <Switch aria-label="Record proof clips" checked={p.on} onCheckedChange={(on) => put({ on })} />

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { BRANCH_NAME, checksState, partDetail, planRestack, planStack, restackHandoff, stackBody, stackBranches, type StackPart, type StackPlan } from "../stack-plan.js";
 import { authEnv } from "./github.js";
-import { githubSlug } from "./git.js";
+import { githubSlug, inWorktreeLine } from "./git.js";
 
 /**
  * Stacked pull requests, carried out (Arun, 2026-11-19, wave 3: "Stacked PRs: split a big change into a stack of small PRs, each based
@@ -667,7 +667,7 @@ async function rebaseBranch(repo: Repo, branch: string, upstream: string, onto: 
   const tip = await sh(repo.top, ["rev-parse", "--verify", `refs/heads/${branch}^{commit}`]);
   try {
     // A worktree that can't be made is a plain error (thrown), never a conflict.
-    await git(repo.top, ["worktree", "add", "--detach", wt, tip]);
+    await inWorktreeLine(repo.top, () => git(repo.top, ["worktree", "add", "--detach", wt, tip]));
     try {
       await git(wt, ["-c", "rebase.autoStash=false", "rebase", "--onto", onto, upstream], { timeout: 5 * 60_000 });
     } catch (e) {
@@ -682,9 +682,9 @@ async function rebaseBranch(repo: Repo, branch: string, upstream: string, onto: 
     await git(repo.top, ["update-ref", `refs/heads/${branch}`, next, tip]);
     return { ok: true };
   } finally {
-    await git(repo.top, ["worktree", "remove", "--force", wt]).catch(() => {});
+    await inWorktreeLine(repo.top, () => git(repo.top, ["worktree", "remove", "--force", wt])).catch(() => {});
     await rm(dir, { recursive: true, force: true }).catch(() => {});
-    await git(repo.top, ["worktree", "prune"]).catch(() => {});
+    await inWorktreeLine(repo.top, () => git(repo.top, ["worktree", "prune"])).catch(() => {});
   }
 }
 

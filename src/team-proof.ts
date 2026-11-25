@@ -67,6 +67,8 @@ export interface Proof {
   review?: ProofReview;
   /** What a whole proof has and this lacks, for the person: "a self-review", "checks". */
   missing: string[];
+  /** The session it was handed in, when known: where Check it asks for the checks it lacks (ProofCard.tsx). */
+  sid?: string;
 }
 
 const clip = (s: string, n: number) => {
@@ -136,10 +138,15 @@ function proofIn(events: readonly SessionEvent[], s: Stretch): Proof {
   for (const c of receipt.commands) if (CHECK_CMD.test(c.command)) self.set(keyOf(c.command), { command: c.command, ok: c.ok, by: "self" });
   // Friday's own check of a board task, run in its folder once it was handed in: the one that counts, so first.
   const checked = s.task ? after.findLast((e) => e.body.type === "board.checked" && e.body.id === s.task) : undefined;
-  const friday: ProofCheck[] = checked?.body.type === "board.checked" ? [{ command: checked.body.command, ok: checked.body.ok, by: "friday", ...(checked.body.skipped ? { skipped: true } : {}), ...(checked.body.pre?.length ? { pre: checked.body.pre.length } : {}), ...(!checked.body.ok && !checked.body.skipped ? { output: checked.body.output.slice(-600) } : {}) }] : [];
+  // Else the tests run for it once it was done (Check it, test-proof.ts proof.tests), the last of them: what the reply's badge says.
+  const tested = checked ? undefined : after.findLast((e) => e.seq > s.to && laneOfEvent(e) === s.lane && e.body.type === "proof.tests" && e.body.runs.length);
+  const friday: ProofCheck[] =
+    checked?.body.type === "board.checked" ? [{ command: checked.body.command, ok: checked.body.ok, by: "friday", ...(checked.body.skipped ? { skipped: true } : {}), ...(checked.body.pre?.length ? { pre: checked.body.pre.length } : {}), ...(!checked.body.ok && !checked.body.skipped ? { output: checked.body.output.slice(-600) } : {}) }]
+    : tested?.body.type === "proof.tests" ? tested.body.runs.map((r) => ({ command: r.command, ok: r.ok, by: tested.body.type === "proof.tests" && tested.body.by === "friday" ? ("friday" as const) : ("self" as const), ...(!r.ok ? { output: r.tail.slice(-600) } : {}) }))
+    : [];
   // Every check still failing is kept (Arun, 2026-11-13: "air tight"): the last four by when they were first run let a failing
   // `npm test` fall off behind four passing commands, and the line read "Checks pass".
-  const own = [...self.values()].filter((c) => c.command !== friday[0]?.command);
+  const own = [...self.values()].filter((c) => !friday.some((f) => keyOf(f.command) === keyOf(c.command)));
   const checks = [...friday, ...own.filter((c) => !c.ok), ...own.filter((c) => c.ok).slice(-4)];
   // Its review: the last it posted for this task, or, for a run of its own, the last it posted in the run with no task named.
   const posted = after.findLast((e) => e.body.type === "proof.posted" && laneOfEvent(e) === s.lane && (s.task ? e.body.id === s.task : !e.body.id));
@@ -163,6 +170,7 @@ function proofIn(events: readonly SessionEvent[], s: Stretch): Proof {
     ...(page ? { page } : {}),
     ...(review ? { review } : {}),
     missing,
+    ...(s.sid ? { sid: s.sid } : {}),
   };
 }
 

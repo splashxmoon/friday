@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { AgentCodeLine, useAgentCodeTokens, type AgentCodeToken } from "@/components/agents/agent-code";
 import { languageFor } from "./DiffView.js";
 import { Icon } from "./icons.js";
+import { PanelGuard } from "./guard.js";
 
 /**
  * Reading and writing a file, with the colours the rest of the app already uses.
@@ -81,7 +82,7 @@ export function CodeReader({ path, value }: { path: string; value: string }) {
 /** A browser, as against the tests' stand-in DOM, which has no layout for CodeMirror to measure: there a plain box stands in. */
 const REAL_DOM = typeof HTMLElement === "function" && typeof requestAnimationFrame === "function";
 
-export function CodeEditor(props: {
+function CodeEditorDrawn(props: {
   path: string;
   value: string;
   /** Put the cursor here when the file opens — where an error said to look. */
@@ -198,5 +199,14 @@ export function QuickOpen({ paths, onPick, onClose }: { paths: string[]; onPick:
         </div>
       </div>
     </div>
+  );
+}
+
+/** An editor that can't be drawn says so in its own place, the file and the rest of the panel untouched (guard.tsx). */
+export function CodeEditor(props: Parameters<typeof CodeEditorDrawn>[0]) {
+  return (
+    <PanelGuard where="editor" title="The editor couldn't be shown" reset={props.path}>
+      <CodeEditorDrawn {...props} />
+    </PanelGuard>
   );
 }

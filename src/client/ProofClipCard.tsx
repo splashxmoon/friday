@@ -12,7 +12,7 @@ import type { SessionEvent } from "../types.js";
 import { fileUrl } from "./api.js";
 import { Icon } from "./icons.js";
 import { Lightbox } from "./Lightbox.js";
-import { TabRing } from "./presence.js";
+import { TabRing, tickEvery } from "./presence.js";
 import "./proof-clip-card.css";
 
 type Clip = Extract<SessionEvent["body"], { type: "proof.clip" }>;
@@ -195,8 +195,8 @@ export function ProofStatusCard({ ev, events, sid, invite, onRetry }: { ev: Sess
   const stale = !failed && Date.now() - ev.ts > 10 * 60_000;
   useEffect(() => {
     if (newer || failed || stale) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    // The page's one 1-second ticker, shared with every other clock and still while the window is hidden (presence.tsx).
+    return tickEvery(1000, setNow);
   }, [newer, failed, stale]);
   if (b.type !== "proof.status" || newer || stale) return null;
   void sid;
@@ -213,7 +213,8 @@ export function ProofStatusCard({ ev, events, sid, invite, onRetry }: { ev: Sess
         {failed ? <Icon name="x" size={11} /> : <TabRing state="working" />}
       </span>
       <span className="pcs-text">
-        <span className="pcs-title">{b.tests ? (failed ? "Couldn't test it" : "Testing it") : failed ? "No proof clip this time" : "Recording a proof clip"}</span>
+        {/* In the badge's words over the run ("Checking…", "Done · couldn't check": check-state.ts), never a second name for one check. */}
+        <span className="pcs-title">{b.tests ? (failed ? "Couldn't check it" : "Checking it") : failed ? "No proof clip this time" : "Recording a proof clip"}</span>
         <span className="pcs-sub">{failed ? b.why || "It couldn't be made." : b.stage === "testing" && b.command ? `Running ${b.command}…` : `${STAGE_WORDS[b.stage]}…`}</span>
       </span>
       {failed && !b.tests ? (

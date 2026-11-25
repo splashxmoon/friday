@@ -14,7 +14,7 @@ import { carriedOn } from "../limit-reset.js";
 import { ENGINE_NAMES, MAIN_LANE, type SessionEvent } from "../types.js";
 import { Icon } from "./icons.js";
 import { EngineMark, FridayMark } from "./BrandMarks.js";
-import { PresenceRing, type Presence } from "./presence.js";
+import { PresenceRing, type Presence, tickEvery } from "./presence.js";
 import { sessionLayout, type SessionLayout } from "./prefs.js";
 
 /**
@@ -106,8 +106,8 @@ export function useRunClock(state: SessionState): number {
   useEffect(() => {
     if (!running) return;
     setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    // The page's one 1-second ticker, shared with every other clock and still while the window is hidden (presence.tsx).
+    return tickEvery(1000, setNow);
   }, [running]);
   return now;
 }

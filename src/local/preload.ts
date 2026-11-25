@@ -29,6 +29,17 @@ contextBridge.exposeInMainWorld("fridayDesktop", {
     ipcRenderer.on("friday:vsc-menu", h);
     return () => void ipcRenderer.off("friday:vsc-menu", h);
   },
+  /**
+   * Told when the computer wakes from sleep or is unlocked (desktop.ts powerMonitor): sleep doesn't hide the page, so a session's
+   * socket can look open to nothing, and the page checks its links at once rather than at the next ping (client/useSession.ts).
+   */
+  onResume: (fn: () => void): (() => void) => {
+    const h = () => fn();
+    ipcRenderer.on("friday:resume", h);
+    return () => void ipcRenderer.off("friday:resume", h);
+  },
+  /** The error page's buttons, when the window's page died and couldn't be brought back (desktop.ts friday:recover). */
+  recover: (what: "reload" | "copy" | "log"): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("friday:recover", what),
   /** Frosted glass: the window's own system blur behind the page (desktop.ts setGlass), where the system has one. */
   setGlass: (on: boolean): void => ipcRenderer.send("friday:glass", on),
   glassNative: process.platform === "darwin" || process.platform === "win32",

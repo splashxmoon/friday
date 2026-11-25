@@ -21,7 +21,8 @@ export interface ProofClips {
   pr: boolean;
 }
 
-export const PROOF_CLIPS_DEFAULT: ProofClips = { on: true, auto: false, before: false, phone: false, pr: true };
+/** Off until turned on (Arun, 2026-11-25: "make the proofs off by default"), and only ever in the IDE's chats. */
+export const PROOF_CLIPS_DEFAULT: ProofClips = { on: false, auto: false, before: false, phone: false, pr: true };
 
 let current: ProofClips | null = null;
 const listeners = new Set<(p: ProofClips) => void>();
@@ -73,6 +74,8 @@ export interface SessionClips {
   mode: ClipMode;
   settings: ClipMode;
   own: boolean;
+  /** One of the IDE's own chats: proof is only ever here; anywhere else it's off and not offered. */
+  ide?: boolean;
 }
 const sessionUrl = (sid: string, invite: string, tail = "proof-clips") => `/api/sessions/${encodeURIComponent(sid)}/${tail}?${new URLSearchParams({ invite })}`;
 async function ask<T>(url: string, init?: RequestInit): Promise<T> {

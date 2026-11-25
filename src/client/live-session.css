@@ -1,0 +1,18 @@
+/* Everything at work shown live, like a working clock (spec 13, Wave 3 E; Arun, 2026-11-20: "everything needs to feel like a working
+   clock"). The sidebar's rows (Sidebar.tsx ChatRow): a stopped row's reason in red, a waiting one's "Asks:" in amber with its
+   question after it, a finished one's pull request and how its checks stand, and a row new since the list was drawn rising into
+   place. */
+.sb-row .sb-row-asks.sb-row-stopped { color: var(--red); }
+.sb-row .sb-row-asks:has(> .sb-asks-word) { color: var(--ink-2); }
+.sb-row .sb-asks-word { color: var(--amber); font-weight: 600; }
+.sb-row > .dass-row-sub > .sb-pr-line { gap: 5px; }
+.sb-pr-line > .sb-where-name { flex: none; }
+.sb-pr-state { flex: 0 1 auto; min-width: 0; color: var(--text-muted); }
+.sb-pr-state.ok { color: var(--green); }
+.sb-pr-state.bad { color: var(--red); }
+.sb-pr-state.merged { color: var(--ink-2); }
+/* The step under way: a shade under the name, as a reply's live line is. */
+.sb-row .sb-crew-words.working.shine { --shine-base: var(--text-muted); --shine-ink: var(--ink); }
+.sb-row[data-fresh] { animation: tm-rise var(--t-move) var(--ease-out) both; }
+@media (prefers-reduced-motion: reduce) { .sb-row[data-fresh] { animation: none; } }
+html.reduce-motion .sb-row[data-fresh] { animation: none; }

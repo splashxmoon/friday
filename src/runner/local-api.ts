@@ -1053,7 +1053,7 @@ export async function callHost(method: string, params: Record<string, unknown> =
         const cwd = str(params.cwd, 600) ? at(params.cwd) : undefined;
         if (cwd && !(await isDir(cwd))) throw new Error(`There's no folder at ${cwd}.`);
         const timeoutMs = Math.min(Math.max(Number(params.timeoutMs) || 0, 0), 15 * 60_000) || undefined;
-        return await askCli({ tool, system: str(params.system, 40_000), prompt: str(params.prompt, 120_000), ...(str(params.model, 60) ? { model: str(params.model, 60) } : {}), ...(cwd ? { cwd } : {}), ...(timeoutMs ? { timeoutMs } : {}) }, onText);
+        return await askCli({ tool, system: str(params.system, 40_000), prompt: str(params.prompt, 120_000), ...(str(params.model, 60) ? { model: str(params.model, 60) } : {}), ...(cwd ? { cwd } : {}), ...(timeoutMs ? { timeoutMs } : {}), ...(params.lean === true ? { lean: true } : {}) }, onText);
       } finally {
         flush();
       }
@@ -1205,12 +1205,29 @@ export async function callHost(method: string, params: Record<string, unknown> =
       const tool = str(params.tool, 20);
       // Antigravity's before its first conversation here: `agy models`, as its ACP option names them (Arun, 2026-11-06: "make sure
       // models can be selected"). Its own list over ACP is kept from then on.
+      // Kept, it is looked at again once ten minutes old, as the other ACP tools are below (a bug report, 2026-11-25: a list kept
+      // from Nov 24 offered 5 models while `agy models` had 11, and the refresh below never ran for Antigravity).
       if (tool === "antigravity") {
+        const agyModels = async () => {
+          const bin = await findBin("antigravity");
+          const r = bin ? await runCli(bin, ANTIGRAVITY_MODELS, 15_000, {}, "antigravity").catch(() => null) : null;
+          return r && r.code === 0 ? antigravityModels(r.out) : [];
+        };
         const known = await knownModels("antigravity");
-        if (known.length) return { models: known };
-        const bin = await findBin("antigravity");
-        const r = bin ? await runCli(bin, ANTIGRAVITY_MODELS, 15_000, {}, "antigravity").catch(() => null) : null;
-        return { models: r && r.code === 0 ? antigravityModels(r.out) : [] };
+        if (known.length) {
+          if (Date.now() - Math.max(await knownModelsAt("antigravity"), lookedAgain.get(tool) ?? 0) > 600_000) {
+            lookedAgain.set(tool, Date.now());
+            void agyModels().then((fresh) => {
+              if (!fresh.length) return;
+              const had = new Map(known.map((m) => [m.id, m.label]));
+              rememberModels("antigravity", fresh.map(({ id, label }) => ({ id, label: had.get(id) ?? label })));
+            });
+          }
+          return { models: known };
+        }
+        const listed = await agyModels();
+        if (listed.length) rememberModels("antigravity", listed);
+        return { models: listed };
       }
       if (tool !== "cursor") {
         if (!(ENGINE_TOOLS as string[]).includes(tool) || !ADAPTERS[tool as EngineTool].interactive || ADAPTERS[tool as EngineTool].dialect) return { models: [] };

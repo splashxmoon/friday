@@ -86,6 +86,10 @@
 .thr-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 0; }
 .thr-row-meta { flex: none; color: var(--faint); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
 .thr-row-meta.needs { color: color-mix(in srgb, var(--amber) 78%, var(--ink)); }
+/* At work: its step, shining, then its clock counting (spec 13); the step gives way first. */
+.thr-row-meta.live { display: inline-flex; align-items: baseline; gap: 6px; flex: 0 1 auto; max-width: 58%; min-width: 0; }
+.thr-row-step { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; --shine-base: var(--text-muted); --shine-ink: var(--ink); }
+.thr-row-clock { flex: none; color: var(--faint); }
 .thr-rows-none { margin: 0; padding: 10px 8px 12px; color: var(--text-muted); font-size: 12.5px; }
 
 /* ── a thread's card, from its tab ────────────────────────────────────── */
@@ -99,6 +103,7 @@
 .thr-card-needs { background: color-mix(in srgb, var(--amber) 13%, transparent); color: color-mix(in srgb, var(--amber) 72%, var(--ink)); }
 .thr-card-needs.stopped { background: color-mix(in srgb, var(--red) 11%, transparent); color: color-mix(in srgb, var(--red) 78%, var(--ink)); }
 .thr-card-now { background: var(--hover); color: var(--ink-2); }
+.thr-card-step { --shine-base: var(--ink-2); --shine-ink: var(--ink); }
 
 .thr-kv { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: start; gap: 6px 10px; margin: 0; }
 .thr-kv dt { color: var(--text-muted); font-size: 12px; line-height: 22px; }

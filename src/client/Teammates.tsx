@@ -6,6 +6,8 @@
  * A teammate's chat is its lane of the team session, focused (agentFocus.ts); the Team room is that session's every-agent view.
  *
  */
+import { logFold } from "./log-memo.js";
+import { pollWhileShown } from "./app-push.js";
 import { WorkLine, doingOfWords } from "./work-line.js";
 import { projectBody, projectError, projectText } from "./room-project-text.js";
 import { ProjectField } from "./RoomProject.js";
@@ -194,11 +196,14 @@ const lanesRead = new WeakSet<readonly SessionEvent[]>();
 export function learnLanes(events: readonly SessionEvent[]): void {
   if (lanesRead.has(events)) return;
   lanesRead.add(events);
-  for (const e of events) {
+  // The same log grown: only what was added is read (log-memo.ts).
+  logFold(lanesFolded, events, () => 0, (n, e) => {
     if (e.body.type === "lane.added" && e.body.lane.name) laneNamed.set(e.body.lane.id, e.body.lane.name);
     if (e.body.type === "lane.renamed" && e.body.name) laneNamed.set(e.body.laneId, e.body.name);
-  }
+    return n;
+  });
 }
+const lanesFolded: Parameters<typeof logFold<number>>[0] = { current: null };
 
 /** The teammates in a session (the team, or one of its rooms), each with its lane there, in the order they joined. */
 /**
@@ -439,7 +444,7 @@ export const teamNow = (): Team | null => (on ? team : null);
  * and stopped with the last.
  */
 let users = 0;
-let timer: ReturnType<typeof setInterval> | null = null;
+let timer: (() => void) | null = null;
 let polled: Identity | null = null;
 /** Whether this tick reads the team: every one here; on the hosted service, every one while the Crew is in view, else every 30s. */
 let due = (): boolean => true;
@@ -451,14 +456,16 @@ export function useTeam(identity: Identity): Team | null {
     subs.add(f);
     polled = identity;
     users++;
-    if (!timer) timer = setInterval(() => polled && due() && void refreshTeam(polled), 4000);
+    // Asked when a session's log grows (app-push.ts), the team's own rooms among them, and once a minute besides; every 4 seconds as
+    // before where nothing tells it. Not on its own while the window is hidden: it asks as it comes back (below).
+    if (!timer) timer = pollWhileShown(() => polled && due() && void refreshTeam(polled), { every: 4000, on: ["sessions"], now: false });
     void refreshTeam(identity);
     const now = () => void refreshTeam(identity);
     document.addEventListener("visibilitychange", now);
     addEventListener("friday:teammates", now);
     return () => {
       subs.delete(f);
-      if (--users === 0 && timer) (clearInterval(timer), (timer = null));
+      if (--users === 0 && timer) (timer(), (timer = null));
       document.removeEventListener("visibilitychange", now);
       removeEventListener("friday:teammates", now);
     };

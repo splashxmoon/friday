@@ -129,3 +129,79 @@ button.db-text:hover { color: var(--ink); text-decoration: none; }
 .db-more-go { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--ink-2); font: 500 12px var(--font); cursor: pointer; }
 .db-more-go:hover { color: var(--ink); }
 .db-sheet-body { overflow-x: hidden; }
+
+/* ── The panel as the night on a line (Arun, 2026-11-24, C of designs/2026-11-24-morning-brief) ─────────────────────────────── */
+.db-sheet.dn { width: min(440px, 100vw); }
+.dn-head { display: flex; flex-direction: column; gap: 6px; padding: 22px 52px 14px 22px; }
+.dn-kicker { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.dn-kicker svg { color: var(--amber); }
+.dn-title.dn-title { margin: 0; color: var(--ink); font-size: 21px; line-height: 1.22; font-weight: 600; letter-spacing: -.02em; text-wrap: balance; }
+.dn-sub.dn-sub { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+.dn-body { padding: 4px 22px 16px; }
+.dn-line { position: relative; list-style: none; margin: 4px 0 0; padding: 0 0 0 26px; }
+.dn-line::before { content: ""; position: absolute; left: 9px; top: 8px; bottom: 8px; width: 1.5px; border-radius: 2px; background: var(--border-strong); }
+.dn-tick { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 0 0 13px; min-width: 0; }
+.dn-dot { position: absolute; left: -22px; top: 3px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--faint); background: var(--panel); }
+.dn-tick[data-tone="done"] .dn-dot { border-color: var(--green); background: var(--green); }
+.dn-tick[data-tone="risk"] .dn-dot { border-color: var(--amber); }
+.dn-tick[data-tone="next"] .dn-dot { border-style: dashed; }
+.dn-when { color: var(--faint); font-size: 11.5px; line-height: 1.4; font-variant-numeric: tabular-nums; }
+.dn-tx { display: flex; align-items: flex-start; gap: 8px; max-width: 100%; min-width: 0; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; line-height: 1.45; text-align: left; }
+button.dn-tx { cursor: pointer; border-radius: 6px; }
+button.dn-tx:hover .dn-words { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+button.dn-tx:focus-visible { outline: 2px solid var(--border-focus, var(--live)); outline-offset: 2px; }
+.dn-tx > :first-child:not(.dn-words) { flex: none; margin-top: 1px; }
+.dn-words { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.dn-words b { font-weight: 600; }
+.dn-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
+.dn-files, .dn-room { color: var(--faint); font-size: 11.5px; }
+.dn-files + .dn-room::before, .db-proof + .dn-room::before { content: "· "; }
+.dn-earlier { position: relative; padding: 0 0 12px; color: var(--faint); font-size: 11.5px; }
+.dn-now { position: relative; display: flex; align-items: center; gap: 8px; margin: 2px 0 14px -26px; }
+.dn-now span { z-index: 1; display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 99px; background: var(--live); color: #fff; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dn-now::after { content: ""; flex: 1; height: 1.5px; border-radius: 2px; background: var(--live); opacity: .45; }
+.dn-wait { position: relative; margin: 0 0 14px; padding: 11px 12px 12px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--card); box-shadow: var(--shadow-xs, none); }
+.dn-wait-who { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
+.dn-wait-who svg { flex: none; color: var(--amber); }
+.dn-wait-who span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dn-wait-who b { color: var(--ink); font-weight: 600; }
+.dn-wait p { margin: 6px 0 10px; color: var(--ink); font-size: 13.5px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.dn-usage { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--border); }
+.dn-usage-name { color: var(--ink); font-size: 12px; font-weight: 500; }
+.dn-usage-name span { color: var(--faint); font-weight: 400; }
+.dn-usage-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px 14px; margin-top: 6px; }
+.dn-meter { display: flex; flex-direction: column; gap: 5px; min-width: 0; color: var(--text-muted); font-size: 11.5px; }
+.dn-meter > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dn-meter b { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.dn-meter > i { display: block; height: 3px; border-radius: 3px; background: var(--hover-strong); overflow: hidden; }
+.dn-meter > i > i { display: block; height: 100%; border-radius: 3px; background: var(--ink-2); }
+.dn-meter[data-level="high"] > i > i { background: var(--amber); }
+.dn-meter[data-level="full"] > i > i { background: var(--red); }
+.dn-meter[data-level="full"] b { color: var(--red); }
+
+/* Its times: a line of chips, each opening Friday's own picker. */
+.dn-foot { padding: 11px 22px; border-top: 1px solid var(--border); }
+.dn-foot-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.dn-foot-word { color: var(--text-muted); font-size: 12px; }
+.dn-foot-zone { margin-left: auto; color: var(--faint); font-size: 12px; }
+.dn-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--card-2); color: var(--ink); font: inherit; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; cursor: pointer; }
+.dn-chip svg { color: var(--text-muted); }
+.dn-chip:hover { border-color: var(--border-strong); }
+.dn-chip[data-state="open"] { border-color: var(--live); box-shadow: 0 0 0 1px var(--live); }
+.dn-chip[data-off] { color: var(--faint); }
+.dn-picker.dn-picker { width: 252px; padding: 6px; }
+.dn-picker-head { display: flex; align-items: center; gap: 8px; padding: 6px 6px 8px; color: var(--ink); font-size: 12.5px; }
+.dn-picker-head b { flex: 1; font-weight: 600; }
+.dn-picker-head svg { color: var(--text-muted); }
+.dn-picker-step { display: flex; align-items: center; gap: 4px; padding: 0 4px 8px; }
+.dn-picker-step[data-off] .dn-picker-big { color: var(--faint); }
+.dn-picker-step button { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 8px; background: none; color: var(--ink-2); cursor: pointer; }
+.dn-picker-step button:hover:not(:disabled) { background: var(--hover); }
+.dn-picker-step button:disabled { opacity: .45; cursor: default; }
+.dn-picker-big { flex: 1; text-align: center; color: var(--ink); font-size: 21px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.dn-picker-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 6px 2px 4px; border-top: 1px solid var(--border); }
+.dn-picker-grid button { height: 26px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.dn-picker-grid button:hover { background: var(--hover); }
+.dn-picker-grid button[aria-pressed="true"] { background: var(--ink); color: var(--panel); font-weight: 500; }
+.dn-picker-zone { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; padding: 8px 6px 4px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 11.5px; }
+.dn-picker-zone .link-btn { margin-left: auto; font-size: 11.5px; }

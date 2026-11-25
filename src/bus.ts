@@ -33,6 +33,13 @@ export function endLiveText(channel: string, lane: string): void {
   if (!lanes.size) heldText.delete(channel);
 }
 
+/** What a lane's agent is streaming of its current message now: words ("text"), its thinking ("reasoning"), or nothing. */
+export function streamingNow(channel: string, lane: string): "text" | "reasoning" | null {
+  const h = heldText.get(channel)?.get(lane);
+  if (!h) return null;
+  return h.text || h.over?.text ? "text" : h.reasoning || h.over?.reasoning ? "reasoning" : null;
+}
+
 function holdDelta(channel: string, lane: string, text: string, kind: "text" | "reasoning"): void {
   let lanes = heldText.get(channel);
   if (!lanes) heldText.set(channel, (lanes = new Map()));
@@ -173,6 +180,11 @@ export class Bus {
       }
     }
     return { deltas, upTo: deltaN };
+  }
+
+  /** What a lane's agent in a session is streaming now, for its row's line (attention.ts crewOf) and its board card. */
+  streaming(sid: string, lane: string): "text" | "reasoning" | null {
+    return streamingNow(sessionKeys(this.prefix, sid).bus, lane);
   }
 
   /** Ask whichever node can take the lane's runner lease to run its agent. */

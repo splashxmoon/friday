@@ -113,6 +113,16 @@ export function loadRecents(): RecentSession[] {
 }
 export const saveRecents = (list: RecentSession[]) => set("mpa.sessions", JSON.stringify(list.slice(0, 100)));
 
+/**
+ * Sessions taken off your list whose leaving the server hasn't taken yet (App.tsx removeRecent): kept off the list, and asked
+ * again, until it has. A removal whose request failed came back the next time the app opened (spec 13, What can break 12).
+ */
+export function loadForgetting(): string[] {
+  const v = getJson<string[]>("friday.forgetting", []);
+  return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+}
+export const saveForgetting = (sids: string[]) => set("friday.forgetting", JSON.stringify([...new Set(sids)].slice(-200)));
+
 export function loadProjects(): Project[] {
   const v = getJson<Project[]>("mpa.projects", []);
   return Array.isArray(v) ? v : [];

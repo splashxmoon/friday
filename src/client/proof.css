@@ -61,3 +61,6 @@
 .pf-handed-title .pf-num { margin-left: auto; flex: none; font-weight: 400; }
 .tm-threads-list .pf-row { gap: 6px; padding: 3px 4px; color: inherit; border-radius: var(--r-sm); }
 .tm-results .pf-handed { padding-inline: 8px; }
+
+/* Check it beside "No tests or checks ran." (ProofCard.tsx CheckIt): Test it's own button, a step in from the words. */
+.pf-none > .pf-check { height: 24px; margin: 6px 0 0; }

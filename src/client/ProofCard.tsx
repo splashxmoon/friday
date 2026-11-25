@@ -9,8 +9,11 @@ import { ChevronRightIcon, CircleCheckIcon, CircleDashedIcon, CircleXIcon, FileD
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { Proof } from "../team-proof.js";
 import { fileUrl } from "./api.js";
+import { testWork, useClipMode } from "./proof-clips.js";
+import { isLocal } from "./edition.js";
 import { useTeamNow, type Team } from "./Teammates.js";
 import "./proof.css";
+import "./proof-clip-card.css";
 
 /** The picture's address: a file of the session it was taken in, read with that session's invite (the Crew room's or a room's). */
 export function pictureOf(t: Team | null, p: Proof): string | null {
@@ -76,6 +79,11 @@ export function ProofFacts({ proof }: { proof: Proof }) {
 export function ProofDetail({ proof }: { proof: Proof }) {
   const t = useTeamNow();
   const picture = pictureOf(t, proof);
+  // Where it was handed in, with the invite to ask there: the Crew room's or one of its rooms'.
+  const invite = proof.sid ? (t?.sid === proof.sid ? t.invite : t?.rooms?.find((r) => r.sid === proof.sid)?.invite) : undefined;
+  // Check it only where proof is on: the IDE's chats (Arun, 2026-11-25), so never in Crew.
+  const mode = useClipMode(proof.sid ?? "", invite ?? "");
+  const checkAt = isLocal() && proof.sid && invite && mode && mode !== "off" ? { sid: proof.sid, invite } : null;
   const n = fileCount(proof);
   return (
     <div className="pf-detail">
@@ -107,7 +115,11 @@ export function ProofDetail({ proof }: { proof: Proof }) {
             ))}
           </ul>
         ) : (
-          <p className="pf-none">No tests or checks ran.</p>
+          <p className="pf-none">
+            No tests or checks ran.
+            {/* The same check a coding reply's badge offers (check-badge.tsx): Friday runs the project's tests where it worked. */}
+            {checkAt && <CheckIt sid={checkAt.sid} invite={checkAt.invite} lane={proof.lane} />}
+          </p>
         )}
       </section>
       <section className="pf-sec" aria-label="What changed">
@@ -161,6 +173,28 @@ export function ProofDetail({ proof }: { proof: Proof }) {
         </ul>
       )}
     </div>
+  );
+}
+
+/** Check it, for work handed in with no checks: Friday runs them where it was done, and the result comes into its room. */
+function CheckIt({ sid, invite, lane }: { sid: string; invite: string; lane: string }) {
+  const [st, setSt] = useState<"idle" | "asked" | "error">("idle");
+  return (
+    <>
+      {" "}
+      <button
+        type="button"
+        className="test-it pf-check"
+        disabled={st === "asked"}
+        title="Friday runs the project's tests where this was done; the result comes into its room"
+        onClick={() => {
+          setSt("asked");
+          void testWork(sid, invite, lane).catch(() => setSt("error"));
+        }}
+      >
+        {st === "asked" ? "Checking… the result comes into its room" : st === "error" ? "Couldn't start it. Try again" : "Check it"}
+      </button>
+    </>
   );
 }
 

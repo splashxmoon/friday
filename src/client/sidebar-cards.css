@@ -1,0 +1,82 @@
+/* The Code sidebar's projects as cards, their threads on a tree (Arun, 2026-11-24: "making the project things into cards with info and
+   threads nested in them", then "Mix of a and b I want that tree"): each folder of threads (and each project you made) is a card,
+   its tile and name, how many work in it, a facts line under the name (Sidebar.tsx ProjectFacts) that stays when it folds, and its
+   threads hanging off a rail that runs down from its tile, each with a tick to its ring and the last with an elbow. */
+
+.sb-tray.sb-card, .sb-card.sb-proj-card {
+  --rail: color-mix(in srgb, var(--ink) 22%, transparent);
+  margin: 0 0 8px;
+  padding: 3px !important;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .04), 0 6px 16px -12px rgb(0 0 0 / .18);
+}
+html.dark :is(.sb-tray.sb-card, .sb-card.sb-proj-card) { --rail: color-mix(in srgb, var(--ink) 16%, transparent); box-shadow: 0 1px 0 rgb(255 255 255 / .03) inset, 0 8px 20px -14px rgb(0 0 0 / .7); }
+.sb-card.sb-card-drop { box-shadow: 0 0 0 2px color-mix(in srgb, var(--live) 55%, transparent); }
+
+/* The head: the name in the card's own weight, a larger tile. */
+.sb-tray.sb-card [data-sidebar="group-label"] { height: 30px; color: var(--ink); font-size: 13px; font-weight: 600; }
+/* Its count stays under the filter button above the list (Arun, 2026-11-19: "line up the filter button with the numbers"): the card's
+   inset (3px + its border) is given back on the right. */
+.sb-tray.sb-card [data-sidebar="group-label"] { padding-right: 2px; }
+.sb-tray.sb-card [data-sidebar="group-label"] .sb-group-count { font-weight: 400; color: var(--text-muted); }
+.sb-tray.sb-card .sb-tile { width: 18px; height: 18px; border-radius: 5px; font-size: 11px; }
+.sb-card.sb-proj-card > .dass-row { min-height: 30px; }
+.sb-card.sb-proj-card > .dass-row .dass-row-title { color: var(--ink); font-size: 13px; font-weight: 600; }
+
+/* The facts line, under the name: the tile's width in (8px label inset + 18px tile + 6px gap; a made project's folder icon is 14px). */
+.sb-card-facts { display: flex; align-items: center; min-width: 0; height: 18px; margin: -3px 0 4px; padding: 0 8px 0 37px; overflow: hidden; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.sb-proj-card > .sb-card-facts { padding-left: 31px; margin-top: -2px; }
+.sb-card-facts > * { display: inline-flex; flex: none; align-items: center; gap: 4px; }
+.sb-card-facts > * + *::before { content: "·"; margin: 0 6px; color: var(--faint); }
+.sb-card-facts .sb-changes { gap: 5px; font: 500 12px var(--mono); font-variant-numeric: tabular-nums; }
+.sb-card-facts .sb-changes .add { color: var(--green); }
+.sb-card-facts .sb-changes .del { color: var(--red); }
+.sb-card-facts svg { width: 12px; height: 12px; }
+
+/* The tree: a rail down from the tile's middle, a tick to each thread's ring, an elbow to the last. The rail's middle is the tree's left
+   edge plus half its 1.5px line, so the tree starts 0.75px short of the tile's middle (1px border + 3px card inset + 12px label inset
+   + 9px half tile = 25px in, less the tree's 4px of card = 21px), and the rail starts at the tile's foot: it runs up past the facts line to touch it (Arun, 2026-11-24: "make
+   the line connect to the folder icon thing for example the P and make sure it is lined up properly and centered too"). */
+.sb-card .sb-tree { position: relative; width: auto !important; margin: 0 0 2px 20.25px; padding: 2px 0 0 8px !important; border: 0; }
+.sb-proj-card .sb-tree { margin-left: 16px; }
+/* Rows on the tree sit 4px nearer the rail than elsewhere, so a narrow sidebar keeps the line under a thread's name whole. */
+.sb-tree > .sb-row { --tree-pad: 6px; padding-left: var(--tree-pad) !important; }
+/* New since you looked: its dot sits on the rail where the thread's tick leaves it, a node of the tree, ringed in the card's colour so
+   the rail doesn't run through it (Arun, 2026-11-24: "fix blue dot placement"). It is placed from the row's name line (its parent),
+   which starts the row's padding in: the rail's middle is 7.25px left of the row. */
+.sb-tree > .sb-row .sb-unread-dot { left: calc(-10.25px - var(--tree-pad)); width: 6px; height: 6px; margin-top: -3px; box-shadow: 0 0 0 2px var(--card); }
+.sb-tree > :is(.dass-row, .sb-day) { position: relative; }
+/* Not while ⌘⌥ numbers the rows: the number takes the row's ::before (style.css .sb-row[data-jump]). */
+.sb-tree > :is(.dass-row:not([data-jump]), .sb-day)::before { content: ""; position: absolute; left: -8px; top: -3px; bottom: 0; border-left: 1.5px solid var(--rail); pointer-events: none; }
+.sb-tree > :is(.dass-row:not([data-jump]), .sb-day):first-child::before { top: -2px; }
+/* From the tile's foot: the facts line (18px, 3px up into the head, 4px below) and the tree's own 2px top, 25px above its first row. */
+.sb-tray.sb-card .sb-tree > :is(.dass-row:not([data-jump]), .sb-day):first-child::before { top: -27px; }
+/* The tick runs to just short of the ring (9px in on the tree, its middle 13.5px down: Sidebar.tsx SessionRing). */
+.sb-tree > .dass-row::after { content: ""; position: absolute; left: -8px; top: 13px; width: 13px; border-top: 1.5px solid var(--rail); pointer-events: none; }
+.sb-tree > .dass-row:not([data-jump]):last-child::before { bottom: auto; height: 16.5px; width: 13px; border-bottom: 1.5px solid var(--rail); border-bottom-left-radius: 6px; }
+.sb-tree > .dass-row:last-child::after { display: none; }
+/* A day's word on the tree, beside its rail rather than under a ring's column. */
+.sb-tree > .sb-day { padding-left: 10px; }
+/* A made project with no threads yet: its hint sits on the tree, with no tick. */
+.sb-tree > p { margin-left: -6px; }
+
+/* A narrow sidebar (Arun, 2026-11-24: "please allow design for when the side bar window is smaller"). The head's name shortens rather
+   than pushing its count off the card. Below about 250px a card spends less on its sides: the tile and the rail move 4px left, rows
+   sit nearer the rail. Under a thread's name, past a certain narrowness, its agents' marks give way to its folder and its change (the
+   ring and the thread itself say who is at work). */
+.sb-tray.sb-card { container: sb-card / inline-size; }
+.sb-tray.sb-card [data-sidebar="group-label"] { min-width: 0; }
+.sb-tray.sb-card [data-sidebar="group-label"] > span:first-child { flex: 0 1 auto; }
+@container sb-card (max-width: 250px) {
+  .sb-tray.sb-card [data-sidebar="group-label"] { padding-left: 4px; }
+  .sb-card-facts { padding-left: 33px; }
+  .sb-tree > .sb-row { --tree-pad: 4px; padding-right: 6px !important; }
+  .sb-tree > .dass-row::after { width: 11px; }
+  .sb-tree > .dass-row:not([data-jump]):last-child::before { width: 11px; }
+}
+@container sb-sub (max-width: 190px) {
+  .sb-tree .sb-where-tools { display: none; }
+  .sb-tree .sb-where-end { padding-left: 4px; }
+}

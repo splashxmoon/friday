@@ -280,6 +280,7 @@ export function WorkspaceCard({
   only: onlyAsked,
   onPick,
   onTool,
+  onOpening,
   onClose,
   plain = false,
   prefer = "above",
@@ -297,6 +298,11 @@ export function WorkspaceCard({
   onPick: (p: Picked | null) => void;
   /** A session of another agent was picked: the composer should switch to that agent to continue it. */
   onTool?: (tool: EngineTool) => void;
+  /**
+   * A folder picked is still being looked at (or cloned) before it is the pick: the box holds its Start until it is, or a run
+   * started meanwhile went to a new project folder instead of the one picked (e2e local-video, 2026-11-24).
+   */
+  onOpening?: (opening: boolean) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -341,6 +347,7 @@ export function WorkspaceCard({
   const byPath = async (p: string, session?: CliSession) => {
     setBusy(p);
     setErr("");
+    onOpening?.(true);
     try {
       const r = await hostApi<{ folder: FolderInfo }>(identity, `/api/runner/describe?path=${encodeURIComponent(p)}`);
       choose(r.folder, session);
@@ -348,12 +355,14 @@ export function WorkspaceCard({
       setErr((e as Error).message);
     } finally {
       setBusy("");
+      onOpening?.(false);
     }
   };
 
   const clone = async (repo: string) => {
     setBusy(repo);
     setErr("");
+    onOpening?.(true);
     try {
       const r = await hostApi<{ folder: FolderInfo }>(identity, "/api/runner/clone", { method: "POST", body: JSON.stringify({ repo }) });
       cache.delete("folders");
@@ -362,6 +371,7 @@ export function WorkspaceCard({
       setErr((e as Error).message);
     } finally {
       setBusy("");
+      onOpening?.(false);
     }
   };
 

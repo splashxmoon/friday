@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { MenuButton, relTime, useDismiss } from "./ui.js";
 import { pickMachine, pickedMachine } from "./local.js";
+import { pollWhileShown } from "./app-push.js";
 import { Icon } from "./icons.js";
 import { bestComputer, rankComputers, toolName, type MachineFacts, type PlaceAsk } from "../placement.js";
 
@@ -108,10 +109,11 @@ export function RunsOn({ onPick, ask }: { onPick?: () => void; /** What the run 
   const [n, setN] = useState(0);
   useEffect(() => {
     let gone = false;
-    const read = () => void call<State>("/api/computers").then((r) => !gone && setState(r), () => {});
-    read();
-    const t = setInterval(read, 8_000);
-    return () => ((gone = true), clearInterval(t));
+    // The same answer leaves the line as it is: set anew, the box under it drew again every 8 seconds.
+    const read = () => void call<State>("/api/computers").then((r) => !gone && setState((was) => (JSON.stringify(was) === JSON.stringify(r) ? was : r)), () => {});
+    // Asked when a computer links or goes (app-push.ts), not every 8 seconds; as before where nothing tells it.
+    const stop = pollWhileShown(read, { every: 8_000, on: ["computers"] });
+    return () => ((gone = true), stop());
   }, [n]);
   useEffect(() => {
     const sync = () => setOn(pickedMachine());

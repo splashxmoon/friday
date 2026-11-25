@@ -188,6 +188,8 @@ const SHIELDED_MS = 30 * 24 * 60 * 60 * 1000;
 /** How long a server's word that somebody is here lasts unless it says it again (SessionStore.presenceTtlMs). */
 const PRESENCE_TTL_MS = 60_000;
 const DROP_IF_SAME = `if redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) end return 0`;
+/** Events after which a session has something going (a tool attached, a run under way): it goes on SessionStore.liveIndex. */
+const LIVE_EVENTS = new Set(["engine.attached", "run.started", "run.resume"]);
 /** What closes a lane's stream on the page (useSession streamsAfter), and so its held text (bus.ts). */
 const ENDS_STREAM = new Set(["agent.message", "run.ended", "run.pause", "run.cancel"]);
 
@@ -567,6 +569,34 @@ export class SessionStore {
     return (await this.redis.exists(this.keys(sid).gone)) === 1;
   }
 
+  /**
+   * The open-source edition's list of sessions that had something going (a coding tool attached, or a run under way), so a start
+   * brings back those alone, rather than reading every recent session's whole log to find them (spec 13, Arun 2026-11-24: "Go all
+   * out and fix these problems"). Added to as such an event is written (appendAll); taken off once a look finds nothing going
+   * (settleLive). Off (null) on the hosted service, where a computer's lanes are brought back as it links.
+   */
+  liveIndex: string | null = null;
+
+  /** The sessions on the list; null when it has never been filled (the first start of a Friday that keeps it): every recent one may be. */
+  async liveSessions(): Promise<string[] | null> {
+    if (!this.liveIndex) return null;
+    const [ready, sids] = await Promise.all([this.redis.exists(`${this.liveIndex}:ready`), this.redis.smembers(this.liveIndex)]);
+    return ready ? sids : null;
+  }
+  /** The list is filled: from now on, it is the whole of what had something going. */
+  async liveReady(): Promise<void> {
+    if (this.liveIndex) await this.redis.set(`${this.liveIndex}:ready`, "1");
+  }
+  /**
+   * A session found with nothing going is taken off the list. Then looked at once more: something that started between the look
+   * and taking it off put it back as it was written, before it was taken off, and would be lost from the list otherwise.
+   */
+  async settleLive(sid: string, live: (s: SessionState) => boolean): Promise<void> {
+    if (!this.liveIndex || live(await this.state(sid))) return;
+    await this.redis.srem(this.liveIndex, sid);
+    if (live(await this.state(sid))) await this.redis.sadd(this.liveIndex, sid);
+  }
+
   async exists(sid: string): Promise<boolean> {
     return (await this.redis.exists(this.keys(sid).events)) === 1 || (await this.restore(sid));
   }
@@ -627,6 +657,8 @@ export class SessionStore {
       return this.appendAll(sid, actor, bodies, { ...guard, fresh: true });
     }
     if (status === "ok") {
+      // Something going from now on: on the list of what a start brings back (liveIndex).
+      if (this.liveIndex && bodies.some((b) => LIVE_EVENTS.has(b.type))) await this.redis.sadd(this.liveIndex, sid).catch(() => {});
       // The lasting copy, as Redis holds it: seq spliced in front exactly as the script does.
       this.archive?.push(sid, Number(seq), [json, ...more].map((r, i) => `{"seq":${Number(seq) + i},${r!.slice(1)}`));
       // With that copy, the Redis one is let go once the session goes quiet (IDLE_LOG_MS), freeing its space: each write pushes it back.

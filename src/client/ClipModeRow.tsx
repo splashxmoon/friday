@@ -16,7 +16,8 @@ export function ClipModeRow({ sid, invite }: { sid: string; invite: string }) {
     void sessionClips(sid, invite).then((r) => live && setC(r), () => {});
     return () => void (live = false);
   }, [sid, invite]);
-  if (!c) return null;
+  // Only the IDE's chats take proof (Arun, 2026-11-25): nothing to set anywhere else.
+  if (!c || c.ide === false) return null;
   const pick = (mode: ClipMode | "settings") => {
     setErr("");
     void setSessionClips(sid, invite, mode).then(setC, (e: Error) => setErr(e.message));

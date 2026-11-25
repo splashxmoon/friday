@@ -83,3 +83,6 @@ export function hiddenNotes(events: SessionEvent[], meId: string, solo: boolean)
   }
   return hide;
 }
+
+/** The events hiddenNotes reads: what else comes leaves what it hides as it was, so the feed asks again only for these (spec 13). */
+export const NOTE_TYPES: ReadonlySet<string> = new Set(["session.created", "member.joined", "link.updated", "engine.expected", "engine.attached", "engine.detached", "control.requested", "control.granted", "control.denied", "control.released"]);

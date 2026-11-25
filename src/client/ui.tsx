@@ -692,13 +692,13 @@ export function Switch({ on, onChange, label, disabled }: { on: boolean; onChang
 }
 
 /** One choice of a Picker. */
-export type PickerOption<T extends string | number> = { value: T; label: string; /** A second line under it in the menu. */ sub?: string; mark?: ReactNode; disabled?: boolean; hint?: string };
+export type PickerOption<T extends string | number> = { value: T; label: string; /** A second line under it in the menu. */ sub?: string; mark?: ReactNode; disabled?: boolean; hint?: string; /** What the closed field says when it's the one picked, where its row's label alone would be unclear. */ text?: string };
 
 /**
  * Friday's own select (Arun, 2026-11-03: "i said to fix the native stuff please run a full app audit"): the choice on a field-like
  * button, Friday's menu under it, never the system's. `className` sizes it as the select it replaces did.
  */
-export function Picker<T extends string | number>({ value, options, onChange, label, className = "", disabled, placeholder = "Choose…", heading }: { value: T; options: PickerOption<T>[]; onChange: (v: T) => void; /** What it picks, for a screen reader and its tooltip. */ label: string; className?: string; disabled?: boolean; placeholder?: string; /** A line over the choices. */ heading?: string }) {
+export function Picker<T extends string | number>({ value, options, onChange, label, className = "", disabled, placeholder = "Choose…", heading, above }: { value: T; options: PickerOption<T>[]; onChange: (v: T) => void; /** What it picks, for a screen reader and its tooltip. */ label: string; className?: string; disabled?: boolean; placeholder?: string; /** A line over the choices. */ heading?: string; /** Always open above the field. */ above?: boolean }) {
   const cur = options.find((o) => o.value === value);
   // Its longest row, a name and its hint at about 7px a letter, the tick and the padding round them.
   const least = Math.round(Math.max(...options.map((o) => o.label.length * 7.4 + (o.hint ? o.hint.length * 6.6 + 8 : 0)), 60) + (options.some((o) => o.mark) ? 26 : 0) + 46);
@@ -706,14 +706,14 @@ export function Picker<T extends string | number>({ value, options, onChange, la
     return (
       <button type="button" className={`menu-pill pick ${className}`} disabled aria-label={label}>
         {cur?.mark && <span className="menu-pill-mark">{cur.mark}</span>}
-        <span>{cur?.label ?? placeholder}</span>
+        <span>{cur?.text ?? cur?.label ?? placeholder}</span>
         <Icon name="chevronDown" size={13} className="menu-pill-caret" />
       </button>
     );
   return (
     <MenuButton
       className={`pick ${className}`}
-      text={cur?.label ?? placeholder}
+      text={cur?.text ?? cur?.label ?? placeholder}
       {...(cur?.mark ? { mark: cur.mark } : {})}
       label={label}
       // As wide as the field and no wider, its rows tight, a hint on the row beside its name (Arun, 2026-11-03: "it is too big even
@@ -721,6 +721,7 @@ export function Picker<T extends string | number>({ value, options, onChange, la
       fit={least}
       compact
       maxHeight={340}
+      {...(above ? { above: true } : {})}
       items={() => [heading ? { heading } : null, ...options.map((o) => ({ label: o.label, checked: o.value === value, ...(o.sub ? { sub: o.sub } : {}), ...(o.mark ? { mark: o.mark } : {}), ...(o.hint ? { after: <span className="pick-hint">{o.hint}</span> } : {}), ...(o.disabled ? { disabled: true } : {}), onSelect: () => onChange(o.value) }))]}
     />
   );
@@ -870,6 +871,15 @@ export function relTime(ts: number): string {
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   if (s < 7 * 86400) return `${Math.floor(s / 86400)}d`;
   return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+/**
+ * How long ago, in words to follow a verb ("Updated", "Last ran", "done"): "just now", "4m ago", "3d ago", and a date as itself,
+ * "Nov 3". relTime's "now" and its dates read wrong with "ago" after them ("Updated now ago", "Nov 3 ago").
+ */
+export function agoWords(ts: number): string {
+  const r = relTime(ts);
+  return r === "now" ? "just now" : /^\d+[mhd]$/.test(r) ? `${r} ago` : r;
 }
 
 export const isTyping = (t: EventTarget | null) => {
@@ -1098,6 +1108,43 @@ export function SkeletonRows({ rows = 4 }: { rows?: number }) {
           <Skeleton w={56} className="sk-end" />
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Lines of code while a file or a diff is read: short and long, some indented, as code runs. The same lines each time for the same
+ * count, so a placeholder drawn again doesn't jump.
+ */
+export function SkeletonCode({ lines = 8, label }: { lines?: number; /** Said to a screen reader, when nothing else on the screen says it is reading. */ label?: string }) {
+  return (
+    <div className="sk-code" {...(label ? { role: "status", "aria-label": label } : { "aria-hidden": true })}>
+      {Array.from({ length: lines }, (_, i) => {
+        const indent = [0, 1, 2, 2, 1, 2, 3, 1, 0, 1][i % 10]!;
+        return (
+          <div key={i} className="sk-code-line">
+            <Skeleton w={22} h={9} className="sk-code-n" />
+            <Skeleton w={`calc(${[46, 62, 38, 70, 30, 54, 44, 66, 24, 58][i % 10]}% - ${indent * 16}px)`} h={9} className={`sk-code-ind-${indent}`} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A folder's listing while it is read: an icon and a name a row, a few of them inside a folder. */
+export function SkeletonTree({ rows = 9, label }: { rows?: number; label?: string }) {
+  return (
+    <div className="sk-tree" {...(label ? { role: "status", "aria-label": label } : { "aria-hidden": true })}>
+      {Array.from({ length: rows }, (_, i) => {
+        const depth = [0, 0, 1, 1, 1, 0, 1, 0, 0][i % 9]!;
+        return (
+          <div key={i} className="sk-tree-row" style={{ paddingLeft: 8 + depth * 14 }}>
+            <Skeleton w={14} h={14} r={4} />
+            <Skeleton w={`${[42, 30, 56, 38, 48, 34, 60, 28, 44][i % 9]}%`} h={10} />
+          </div>
+        );
+      })}
     </div>
   );
 }

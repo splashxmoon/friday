@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { EngineTool } from "../types.js";
-import { ADAPTERS, childEnv, forgetLoginStatus, launcher, toolEnv, type TurnSpec } from "./adapters.js";
+import { ADAPTERS, childEnv, forgetLoginStatus, launcher, type TurnSpec } from "./adapters.js";
 import { spawnCli, type CliProcess } from "./spawn-cli.js";
 
 /**
@@ -201,7 +201,7 @@ export async function startAcpSignIn(tool: EngineTool, bin: string, opts: { wait
   const how = await launcher(bin);
   const turn: TurnSpec = { prompt: "", system: "", resumeId: null, mode: "plan", ask: true };
   const launch = [how.command, ...how.prefix, ...a.args(turn)];
-  const child = spawnCli(launch[0]!, launch.slice(1), { cwd: dir, env: toolEnv(tool, { ...childEnv(), ...how.env, ...(a.env?.(turn) ?? {}), PYTHONUNBUFFERED: "1" }) });
+  const child = spawnCli(launch[0]!, launch.slice(1), { cwd: dir, env: { ...childEnv(), ...how.env, ...(a.env?.(turn) ?? {}), PYTHONUNBUFFERED: "1" } });
   let settle!: () => void;
   const me: Current = { phase: "starting", at: Date.now(), child, done: new Promise<void>((r) => (settle = r)) };
   current.set(tool, me);

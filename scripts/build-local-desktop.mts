@@ -2,15 +2,16 @@ import { execFileSync } from "node:child_process";
 /**
  * The open-source edition's desktop app, built into dist/ for Electron (src/local/desktop.ts):
  *   dist/client/   the page, built ahead so the app needs no bundler
+ *   dist/public/   index.html, style.css and the rest of public/, the stylesheet minified
  *   dist/main.mjs  Electron's main process: the desktop shell and the whole local server, in one file
  *
  *   npm run desktop        build, then open it
  *   npm run desktop:dist   build, then package installers into release/ (electron-builder)
  */
-import { build } from "esbuild";
+import { build, transform } from "esbuild";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import os from "node:os";
-import { cp, rm } from "node:fs/promises";
+import { cp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,6 +33,15 @@ if (existsSync(appsFile)) {
 
 await rm(dist, { recursive: true, force: true });
 await build(clientBuildOptions(path.join(dist, "client"), true));
+// public/ beside it, its stylesheet without its comments and indentation (whitespace only, as src/css-minify.ts makes the hosted
+// build's, which the export leaves out: no rule merged, reordered or rewritten), as the hosted build serves it: 1.33 MB
+// as written, every first screen waited for all of it (spec 13). The app serves this copy (PUBLIC_DIR, set in main.mjs's banner);
+// the folder as written stays as it is for `npx friday`.
+await cp(path.join(root, "public"), path.join(dist, "public"), { recursive: true });
+{
+  const css = path.join(dist, "public", "style.css");
+  await writeFile(css, (await transform(await readFile(css, "utf8"), { loader: "css", minifyWhitespace: true, logLevel: "silent" })).code);
+}
 // The Friday extension for the optional VS Code (src/vscode-ext/): plain files beside main.mjs, where src/runner/vscode.ts looks.
 await cp(path.join(root, "src", "vscode-ext", "friday"), path.join(dist, "vscode-ext", "friday"), { recursive: true });
 // VS Code itself, packed per platform into build/code-server for electron-builder's extraResources (scripts/vscode-bundle.mts).
@@ -48,8 +58,11 @@ await build({
   // which only builds the page when there's no prebuilt one, so a packaged app never loads it.
   external: ["electron", "@homebridge/node-pty-prebuilt-multiarch", "esbuild"],
   define: { __FRIDAY_BUILT_IN_APPS__: builtInApps },
-  // A require() inside an ES module, for the CommonJS packages bundled code reaches for.
-  banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
+  // A require() inside an ES module, for the CommonJS packages bundled code reaches for. And the page's files from dist/public, the
+  // stylesheet minified (above), before anything reads where they are; one set from outside (a test) still decides.
+  banner: {
+    js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url); import { fileURLToPath as __fu } from 'node:url'; import { existsSync as __ex } from 'node:fs'; { const p = __fu(new URL('./public', import.meta.url)); if (!process.env.PUBLIC_DIR && __ex(p)) process.env.PUBLIC_DIR = p; }",
+  },
   logLevel: "warning",
 });
 // The page's bridge (src/local/preload.ts): CommonJS, which a sandboxed preload has to be.

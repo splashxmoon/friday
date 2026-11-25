@@ -1952,8 +1952,11 @@ button.mt-tab { padding: 0 10px; border: 0; background: none; cursor: pointer; }
    dynamic and fun"; teammate-face.tsx). At rest each blinks now and then on its own rhythm (--blink-t, --blink-d from its seed). A
    row, card or button with a face in it, hovered: the face hops, squashing as it lands, and glances up. The face itself hovered:
    a little wiggle. All of it still under reduced motion. */
+/* The blink shuts the eyes from above and below (a clip), not by squashing them (a transform): a transform on a shape inside an
+   svg lays the page out again on every frame it runs, and with three faces in the sidebar an idle Home was laid out twice a second
+   for it (spec 13). The same thin line at its shut moment. */
 .tm-face .tm-eyes { transform-box: fill-box; transform-origin: 50% 50%; animation: tm-blink var(--blink-t, 6s) var(--blink-d, 0s) infinite; }
-@keyframes tm-blink { 0%, 95.5%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0.12); } }
+@keyframes tm-blink { 0%, 95.5%, 100% { clip-path: inset(0); } 97% { clip-path: inset(44% 0 44% 0); } }
 .tm-face-in { transform-origin: 50% 100%; }
 :is(button, a, [role="button"], [role="tab"], .oss-crew-item, .aw-door, .rp-member, .msd-row):hover .tm-face-in { animation: tm-hop 560ms cubic-bezier(.3, .7, .4, 1) 1; }
 :is(button, a, [role="button"], [role="tab"], .oss-crew-item, .aw-door, .rp-member, .msd-row):hover .tm-face .tm-eyes { animation: tm-glance 560ms ease-out 1 both; }
@@ -1974,7 +1977,8 @@ html.reduce-motion :is(.tm-face .tm-eyes, .tm-face-in) { animation: none !import
 
 /* Dozing (Teammates.tsx useDozing): eyes shut, a slow breath and a small z z drifting up. Hovered, or once you type, awake. */
 .tm-face.tm-dozing .tm-eyes { visibility: hidden; animation: none; }
-.tm-face.tm-dozing .tm-blob-body { transform-box: fill-box; transform-origin: 50% 100%; animation: tm-snooze 4.2s ease-in-out infinite; }
+/* The breath moves the whole face, which the compositor runs, not its body's shape inside the svg, which was a layout every frame. */
+.tm-face.tm-dozing { transform-origin: 50% 100%; animation: tm-snooze 4.2s ease-in-out infinite; }
 @keyframes tm-snooze { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.03, 0.965); } }
 .tm-zz { position: absolute; top: -6px; right: -5px; display: flex; gap: 0; pointer-events: none; }
 .tm-zz i { display: block; color: var(--text-muted); font: italic 600 9px/1 var(--font); opacity: 0; animation: tm-zz 3.2s ease-in-out infinite; }
@@ -1983,8 +1987,8 @@ html.reduce-motion :is(.tm-face .tm-eyes, .tm-face-in) { animation: none !import
 :is(button, a, [role="button"], [role="tab"], .oss-crew-item, .aw-door, .rp-member, .msd-row, .tm-face-wrap):hover .tm-face.tm-dozing .tm-eyes { visibility: visible; }
 :is(button, a, [role="button"], [role="tab"], .oss-crew-item, .aw-door, .rp-member, .msd-row, .tm-face-wrap):hover .tm-face.tm-dozing .tm-eyes-shut { visibility: hidden; }
 :is(button, a, [role="button"], [role="tab"], .oss-crew-item, .aw-door, .rp-member, .msd-row, .tm-face-wrap):hover .tm-zz { display: none; }
-@media (prefers-reduced-motion: reduce) { .tm-face.tm-dozing .tm-blob-body, .tm-zz i { animation: none !important; } .tm-zz i { opacity: 0.7; } }
-html.reduce-motion :is(.tm-face.tm-dozing .tm-blob-body, .tm-zz i) { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { .tm-face.tm-dozing, .tm-zz i { animation: none !important; } .tm-zz i { opacity: 0.7; } }
+html.reduce-motion :is(.tm-face.tm-dozing, .tm-zz i) { animation: none !important; }
 
 /* A crew mate's message, in the open-source edition (Activity.tsx chatty): its actions under it once it is pointed at, as a chat
    app's are, so a room reads as messages and not as rows of buttons; one pressed stays. */

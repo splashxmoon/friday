@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { call } from "./Computers.js";
+import { pollWhileShown } from "./app-push.js";
 import { Icon } from "./icons.js";
 
 /**
@@ -96,10 +97,10 @@ export function LinkOffers() {
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let gone = false;
-    const look = () => void call<{ offers: typeof offers }>("/api/computers/offers").then((r) => !gone && setOffers(r.offers), () => {});
-    look();
-    const t = setInterval(look, 3000);
-    return () => ((gone = true), clearInterval(t));
+    const look = () => void call<{ offers: typeof offers }>("/api/computers/offers").then((r) => !gone && setOffers((was) => (JSON.stringify(was) === JSON.stringify(r.offers) ? was : r.offers)), () => {});
+    // Asked when an offer comes (app-push.ts), not every 3 seconds; as before where nothing tells it.
+    const stop = pollWhileShown(look, { every: 3000, on: ["offers"] });
+    return () => ((gone = true), stop());
   }, []);
   const o = offers[0];
   const ref = useRef<HTMLDivElement>(null);

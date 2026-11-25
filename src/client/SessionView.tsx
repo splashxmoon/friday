@@ -1,4 +1,4 @@
-import { StateRing } from "./presence.js";
+import { StateRing, tickEvery } from "./presence.js";
 import { openKeepGoing } from "./crew-carry-open.js";
 import { dragEnds } from "./drag-end.js";
 import { isLocal, ownModel, planLimits, type SessionPlan } from "./edition.js";
@@ -490,6 +490,8 @@ export function SessionView({
     return () => onInvites(null);
   }, [invites]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // What each agent is streaming now (its words or its thinking, never logged): the side panel and the sidebar say so as the reply does.
+  const streamingLanes = Object.entries(s.streams).flatMap(([l, x]) => (x.text ? [`${l}:text`] : x.reasoning ? [`${l}:reasoning`] : [])).join();
   // Tab-title badge when this person is needed: the agent asked them, or someone wants control.
   const attention =
     s.state && s.me
@@ -512,6 +514,21 @@ export function SessionView({
     lastWaits.current = waits;
     window.dispatchEvent(new Event("friday:attention"));
   }, [waits]);
+  // And what each agent is doing changing (a step under way, its step back, writing its answer), so the sidebar's row says what the
+  // chat says within a moment rather than at the next look (spec 13 polish). At most every second and a half: a quick run takes a
+  // step a second, and each look reads every listed session.
+  const doingKey = s.state ? `${JSON.stringify(s.state.doing ?? {})}|${Object.entries(s.state.inFlight ?? {}).map(([l, x]) => `${l}:${x.length}`).join()}|${streamingLanes}` : "";
+  const lastDoing = useRef(doingKey);
+  const doingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    if (doingKey === lastDoing.current || doingTimer.current) return;
+    doingTimer.current = setTimeout(() => {
+      doingTimer.current = undefined;
+      lastDoing.current = "";
+      window.dispatchEvent(new Event("friday:attention"));
+    }, 1500);
+  }, [doingKey]);
+  useEffect(() => () => clearTimeout(doingTimer.current), []);
   // The tab's icon carries a dot too: amber when this person is needed, violet while an agent works, green when the last run finished well.
   const tabDot = s.state ? tabStatus(s.state, s.events, attention) : null;
   useEffect(() => {
@@ -544,7 +561,7 @@ export function SessionView({
   // Every agent's state, worked out once here for the rail, the status bar, the needs-you count and ⌘J alike, so no two
   // places can say different things about the same agent.
   const shownState = replayState ?? s.state;
-  const hubAgents = useMemo(() => (shownState ? hubOf(shownState, shownEvents, s.me?.id ?? "").agents : []), [shownState, shownEvents, s.me?.id]);
+  const hubAgents = useMemo(() => (shownState ? hubOf(shownState, shownEvents, s.me?.id ?? "", (l) => { const on = streamingLanes.split(","); return on.includes(`${l}:text`) ? "text" : on.includes(`${l}:reasoning`) ? "reasoning" : null; }).agents : []), [shownState, shownEvents, s.me?.id, streamingLanes]);
   // What reads the agents below gets them from this store (agentFocus.ts AgentsStore): the same one for good, filled here.
   const agentsHere = useMemo(agentsStore, []);
   agentsHere.put(hubAgents);
@@ -1858,8 +1875,8 @@ function Meter({ events, running }: { events: SessionEvent[]; running: boolean }
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!running) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    // The page's one 1-second ticker, shared with every other clock and still while the window is hidden (presence.tsx).
+    return tickEvery(1000, setNow);
   }, [running]);
   let start = -1;
   for (let i = events.length - 1; i >= 0; i--) if (events[i]!.body.type === "run.started") { start = i; break; }
@@ -1890,28 +1907,8 @@ function Meter({ events, running }: { events: SessionEvent[]; running: boolean }
  * name the repo it belongs to; several lanes in one repo show as one repo.
  * Racing copies are left out: they are throwaways, not the project.
  */
-export function reposOf(state: SessionState | null | undefined): RepoUse[] {
-  if (!state) return [];
-  const by = new Map<string, RepoUse>();
-  for (const [lane, e] of Object.entries(state.engines)) {
-    if (!e.cwd || /friday-race-[0-9a-f]{8}/.test(e.cwd)) continue;
-    const base = e.cwd.split(/[\\/]/).filter(Boolean).pop() ?? e.cwd;
-    // A worktree's folder is `<repo>-<id>`: it belongs to the repo, whatever lane is in it.
-    const name = base.replace(/-[0-9a-f]{8}$/, "");
-    const had = by.get(name);
-    // The main lane's branch is the one to show; a lane's own worktree branch is a detail of that lane.
-    // Made by Friday for the session, when nobody picked a folder: ~/Friday/Projects/<what was asked> (audit CODE-20).
-    const made = /[\\/]Friday[\\/]Projects[\\/][^\\/]+[\\/]?$/.test(e.cwd);
-    // The folder itself, so a new thread in the project can start there; the main lane's when it has one.
-    const path = lane === MAIN_LANE || !had?.path ? (e.copyOf ?? e.cwd) : had.path;
-    const worktree = lane === MAIN_LANE || !had ? !!e.copyOf : !!had.worktree;
-    // Where that lane really edits (the worktree), for Code, whose folder must be the one the agent's changes land in.
-    const cwd = lane === MAIN_LANE || !had?.cwd ? e.cwd : had.cwd;
-    if (!had || lane === MAIN_LANE) by.set(name, { name, branch: lane === MAIN_LANE || !had ? e.branch : had.branch, live: !!had?.live || e.online, ...(made || had?.made ? { made: true } : {}), path, ...(worktree ? { worktree: true, cwd } : {}) });
-    else had.live = had.live || e.online;
-  }
-  return [...by.values()];
-}
+export { reposOf } from "../session-repos.js";
+import { reposOf } from "../session-repos.js";
 
 /** Where the session works, for the status bar: the custom agent, the folder (its git menu) and the branch. */
 function Where({ state, sid, invite, send }: { state: SessionState; sid: string; invite: string; send: Send }) {

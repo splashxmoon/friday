@@ -1,5 +1,6 @@
 import { MAIN_LANE, type SessionEvent, type ToolCall } from "./types.js";
 import { limitHit } from "./limit-reset.js";
+import { callDoing, doingWords, LIVE_WORDS, livePhase, type Streaming } from "./step-words.js";
 
 /**
  * What an agent is doing right now, in a few words.
@@ -105,7 +106,7 @@ export interface Doing {
  * with no step yet is it starting. Tool results come after the call, so a call without a result is the one in flight, and
  * one with a result means the agent is thinking about what to do next.
  */
-export function doingNow(events: SessionEvent[], lane: string): Doing | null {
+export function doingNow(events: SessionEvent[], lane: string, /** What it is streaming now (never logged): its words are it writing its answer. */ streaming: Streaming = null): Doing | null {
   let started = -1;
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
@@ -120,9 +121,12 @@ export function doingNow(events: SessionEvent[], lane: string): Doing | null {
   const mine = events.slice(started).filter((e) => (e.lane ?? MAIN_LANE) === lane);
   const steps = mine.filter((e) => e.body.type === "agent.message").length;
   const last = [...mine].reverse().find((e) => e.body.type === "agent.message");
-  if (!last || last.body.type !== "agent.message") return { text: "Getting started", ts: mine[0]!.ts, steps: 0 };
+  // Said in the one set of words every place says them (step-words.ts liveWords): the sidebar, the side panel, the board, the reply.
+  if (!last || last.body.type !== "agent.message") return { text: LIVE_WORDS[livePhase(false, streaming)], ts: mine[0]!.ts, steps: 0 };
+  // Its words streaming beat a step that still looks under way, as the reply's own line has it (client/run-line.tsx).
+  if (streaming === "text") return { text: LIVE_WORDS.writing, ts: last.ts, steps };
   const calls = last.body.toolCalls;
-  if (!calls.length) return { text: last.body.text.trim() ? "Writing its answer" : "Thinking", ts: last.ts, steps };
+  if (!calls.length) return { text: last.body.text.trim() ? LIVE_WORDS.writing : LIVE_WORDS.thinking, ts: last.ts, steps };
   const answered = new Set(mine.filter((e) => e.body.type === "tool.result").map((e) => (e.body as { callId: string }).callId));
   const inFlight = calls.filter((c) => !answered.has(c.id));
   const pick = inFlight.at(-1);
@@ -133,9 +137,9 @@ export function doingNow(events: SessionEvent[], lane: string): Doing | null {
     const what = (parse(out[0]!.arguments).description as string | undefined) ?? "";
     return { text: out.length > 1 ? `Waiting on ${out.length} subagents` : what ? `Waiting on a subagent: ${clip(what, 40)}` : "Waiting on a subagent", ts: last.ts, steps };
   }
-  if (pick) return { text: describeCall(pick), ts: last.ts, steps };
-  // Everything it asked for has come back: it is deciding what next.
-  return { text: "Thinking about what to do next", ts: mine.at(-1)!.ts, steps };
+  if (pick) return { text: doingWords(callDoing(pick)), ts: last.ts, steps };
+  // Everything it asked for has come back: writing its answer when its words are coming, else deciding what next.
+  return { text: LIVE_WORDS[livePhase(true, streaming)], ts: mine.at(-1)!.ts, steps };
 }
 
 /**

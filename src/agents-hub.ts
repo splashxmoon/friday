@@ -1,4 +1,5 @@
 import { describeCall, doingNow, stoppedLine } from "./activity-line.js";
+import type { Streaming } from "./step-words.js";
 import { laneLabel, latestPlan } from "./left-off.js";
 import { plainLine } from "./client/work-outputs.js";
 import { carriedOn, clockUntil, limitHit, signedOut } from "./limit-reset.js";
@@ -133,7 +134,7 @@ function readMessage(e: SessionEvent): Read {
 }
 
 /** `meId`: who is looking, so their own tools read as just "Claude Code" and somebody else's as "Maya's Claude Code". */
-export function hubOf(state: SessionState, events: SessionEvent[], meId = ""): { agents: HubAgent[]; files: HubFile[]; checks: HubCheck[]; recent: HubStep[] } {
+export function hubOf(state: SessionState, events: SessionEvent[], meId = "", /** What a lane is streaming now (its words or its thinking, never logged). */ streaming?: (lane: string) => Streaming): { agents: HubAgent[]; files: HubFile[]; checks: HubCheck[]; recent: HubStep[] } {
   const lanes = [MAIN_LANE, ...state.lanes.map((l) => l.id)];
   // Per lane: when its current or last run started and ended, how that ended, its last words.
   const runs = new Map<string, { started: number | null; ended: number | null; outcome: string | null; error: string; answer: string }>();
@@ -206,7 +207,7 @@ export function hubOf(state: SessionState, events: SessionEvent[], meId = ""): {
     if (now.held?.kind === "approval" && ask) return { ...rest, line: ask.items.length ? `${needsYou ? "Needs you" : now.word}: ${clip(ask.items[0]!, 44)}` : rest.now.word };
     if (now.held?.kind === "ask" && decision) return { ...rest, line: `${needsYou ? "Needs a decision" : now.word}: ${clip(decision.question, 44)}` };
     if (now.held) return { ...rest, line: rest.now.word };
-    if (now.phase === "working") return { ...rest, line: doingNow(events, lane)?.text ?? "Working" };
+    if (now.phase === "working") return { ...rest, line: doingNow(events, lane, streaming?.(lane) ?? null)?.text ?? "Working" };
     if (now.phase === "paused") return { ...rest, line: "Paused" };
     // Out of usage, its own or its account's (limited.ts), with when it comes back; once that has passed, ready again.
     if (now.phase === "limited") {

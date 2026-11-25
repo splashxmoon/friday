@@ -11,6 +11,9 @@ import { EngineMark } from "./BrandMarks.js";
 import { MenuButton, placeCard, relTime, useDismiss } from "./ui.js";
 import { isTeamSid } from "./Teammates.js";
 import { folderName } from "./Workspace.js";
+import { LiveClock, useNow } from "./presence.js";
+import { Shine } from "./shine.js";
+import { workingStep } from "../step-words.js";
 import type { Identity, RecentSession, RepoUse } from "./storage.js";
 import "./threads.css";
 
@@ -266,9 +269,11 @@ function AllThreads({ trigger, d, threads, sid, labelFor, unread, name, onPick, 
       )}
       <div ref={list} className="thr-rows" role="listbox" aria-label="Threads">
         {shown.map((r, i) => {
-          const { state, needs, working } = standing(d, r.sid);
+          const { state, needs, working, crew } = standing(d, r.sid);
           const since = d.attention.since.get(r.sid) ?? r.openedAt;
           const active = r.sid === sid;
+          // At work: its step, shining, and how long it has been at it, counting (spec 13), where it said "Working".
+          const step = working && state !== "needs" ? (workingStep(crew?.agents) ?? "Working") : null;
           return (
             <button
               key={r.sid}
@@ -284,7 +289,14 @@ function AllThreads({ trigger, d, threads, sid, labelFor, unread, name, onPick, 
                 <Ring d={d} sid={r.sid} active={active} />
               </span>
               <span className="thr-row-name">{labelFor(r)}</span>
-              <span className={`thr-row-meta${state === "needs" ? " needs" : ""}`}>{state === "needs" ? (needs?.kind === "stopped" ? "Stopped" : "Needs you") : working ? "Working" : relTime(since)}</span>
+              {step && working ? (
+                <span className="thr-row-meta live" title={step}>
+                  <Shine className="thr-row-step">{step}</Shine>
+                  <LiveClock className="thr-row-clock" since={working.startedAt ?? since} />
+                </span>
+              ) : (
+                <span className={`thr-row-meta${state === "needs" ? " needs" : ""}`}>{state === "needs" ? (needs?.kind === "stopped" ? "Stopped" : "Needs you") : relTime(since)}</span>
+              )}
             </button>
           );
         })}
@@ -362,6 +374,9 @@ function ThreadTab({ d, r, label, active, unread, closable, renamable, quiet, on
 function ThreadCard({ anchor, d, r, label, onEnter, onLeave }: { anchor: HTMLElement | null; d: ThreadsData; r: RecentSession; label: string; onEnter: () => void; onLeave: () => void }) {
   const { needs, crew, working } = standing(d, r.sid);
   const since = d.attention.since.get(r.sid);
+  // Its time moves while the card is up: counting the seconds while it works, else "4m" on the minute.
+  useNow(30_000);
+  const step = working && !needs ? workingStep(crew?.agents) : null;
   const preview = d.attention.previews.get(r.sid);
   const pr = d.attention.prs.get(r.sid);
   const repo = r.repos?.[0];
@@ -375,10 +390,14 @@ function ThreadCard({ anchor, d, r, label, onEnter, onLeave }: { anchor: HTMLEle
       <div className="thr-card-head">
         <Ring d={d} sid={r.sid} active={false} />
         <b>{label}</b>
-        {since ? <span className="thr-card-when">{relTime(since)}</span> : null}
+        {working && !needs ? <LiveClock className="thr-card-when" since={working.startedAt ?? since ?? r.openedAt} title="How long it has been at it" /> : since ? <span className="thr-card-when">{relTime(since)}</span> : null}
       </div>
       {needs && <p className={`thr-card-needs${needs.kind === "stopped" ? " stopped" : ""}`}>{needs.kind === "stopped" ? needs.text : `Needs you: ${needs.text}`}</p>}
-      {!needs && working && <p className="thr-card-now">{working.what}</p>}
+      {!needs && working && (
+        <p className="thr-card-now">
+          <Shine className="thr-card-step">{step ?? (working.lanes > 1 ? `${working.lanes} agents working` : "Working")}</Shine>
+        </p>
+      )}
       <dl className="thr-kv">
         {repo?.branch && (
           <>

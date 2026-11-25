@@ -64,3 +64,38 @@ test("a permission card goes with the run that asked, under it, not above the me
   // One with no run before it keeps its place.
   assert.deepEqual(order([{ name: "lone", info: { kind: "after", lane: "x", seq: 3 } }, { name: "note", info: { kind: "other", seq: 4 } }], []), ["lone", "note"]);
 });
+
+test("finishingOrder in one pass each way puts every item where looking for each one's run from the start did (spec 13)", () => {
+  /** As it was: each message's next run and each card's last run looked for across the whole list. */
+  const before = <T,>(items: T[], info: (t: T) => OrderInfo, last: (t: T) => number, working: ReadonlySet<string>): T[] => {
+    const infos = items.map(info);
+    const place = new Array<number>(items.length);
+    infos.forEach((x, i) => {
+      if (x.kind === "other") place[i] = x.seq;
+      else if (x.kind === "run") place[i] = x.ended ?? (x.live ? Infinity : last(items[i]!));
+    });
+    infos.forEach((x, i) => {
+      if (x.kind !== "ask") return;
+      const next = infos.findIndex((y, j) => j > i && y.kind === "run" && y.lane === x.lane);
+      place[i] = next !== -1 ? place[next]! : working.has(x.lane) ? Infinity : x.seq;
+    });
+    infos.forEach((x, i) => {
+      if (x.kind !== "after") return;
+      const run = infos.findLastIndex((y, j) => j < i && y.kind === "run" && y.lane === x.lane);
+      place[i] = run !== -1 ? place[run]! : x.seq;
+    });
+    return items.map((it, i) => ({ it, i, at: place[i]! })).sort((a, b) => (a.at === b.at ? a.i - b.i : a.at - b.at)).map((x) => x.it);
+  };
+  let seed = 5;
+  const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) % n);
+  for (let round = 0; round < 300; round++) {
+    const infos: OrderInfo[] = Array.from({ length: 1 + rnd(40) }, (_, i) => {
+      const lane = "abc"[rnd(3)]!;
+      const k = rnd(4);
+      return k === 0 ? { kind: "run", lane, ...(rnd(2) ? { ended: i * 2 + rnd(9) } : {}), live: !!rnd(2) } : k === 1 ? { kind: "ask", lane, seq: i * 2 } : k === 2 ? { kind: "after", lane, seq: i * 2 } : { kind: "other", seq: i * 2 };
+    });
+    const ids = infos.map((_, i) => i);
+    const working = new Set(rnd(2) ? ["a"] : []);
+    assert.deepEqual(finishingOrder(ids, (i) => infos[i]!, (i) => i * 2 + 1, working), before(ids, (i) => infos[i]!, (i) => i * 2 + 1, working), `round ${round}`);
+  }
+});

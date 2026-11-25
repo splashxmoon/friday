@@ -1,5 +1,6 @@
 import { shortTokens } from "../tool-usage.js";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { tickEvery } from "./presence.js";
 import { LimitRing } from "./LimitRing.js";
 import { carefulClass } from "../command-class.js";
 import { hubOf, type AgentStatus, type HubAgent, type HubCheck } from "../agents-hub.js";
@@ -89,8 +90,8 @@ export function AgentsHub({
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!working) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    // The page's one 1-second ticker, shared with every other clock and still while the window is hidden (presence.tsx).
+    return tickEvery(1000, setNow);
   }, [working]);
   const mayDrive = (lane: string) => canDriveLane(state, me.id, lane) || me.role === "owner";
   const nameOf = (lane: string) => hub.agents.find((a) => a.lane === lane)?.name ?? "the agent";

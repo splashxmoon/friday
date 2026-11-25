@@ -24,6 +24,9 @@ import { InlineEdit, MenuButton, type MenuItem } from "./ui.js";
  * (runner/model-lists.ts), so the list is there from the start.
  */
 const live = new Map<string, EngineModelInfo[]>();
+/** When each tool was last asked: a list older than ten minutes is asked for again as the picker shows, the one it has shown
+ *  meanwhile (a bug report, 2026-11-25: Antigravity gained six models and the page kept its first list until a reload). */
+const askedAt = new Map<string, number>();
 /** The tools whose list is in the picker already, and so not asked for. */
 const LISTED: readonly EngineTool[] = ["claude", "codex", "amp"];
 
@@ -32,7 +35,8 @@ export function useEngineModelInfo(tool: EngineTool, identity?: Identity): Engin
   const [asked, setAsked] = useState<EngineModelInfo[] | null>(live.get(tool) ?? null);
   useEffect(() => {
     setAsked(live.get(tool) ?? null);
-    if (LISTED.includes(tool) || !identity || live.has(tool)) return;
+    if (LISTED.includes(tool) || !identity || (live.has(tool) && Date.now() - (askedAt.get(tool) ?? 0) < 600_000)) return;
+    askedAt.set(tool, Date.now());
     let on = true;
     hostApi<{ models: { id: string; label: string; group?: string }[] }>(identity, "/api/runner/models", { method: "POST", body: JSON.stringify({ tool }) }).then(
       (r) => {

@@ -10,6 +10,7 @@
  * while the window is hidden.
  */
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { pushed, pushOpen } from "./app-push.js";
 import { createRoot } from "react-dom/client";
 import { useMode } from "./ide/mode.js";
 import { applyGlass, themeChoice } from "./prefs.js";
@@ -130,6 +131,10 @@ export function startBackdrops(): void {
     if (first) return void (first = false);
     void load();
   };
+  // The page's one stream from this computer's Friday: what else changed for it comes on it too (app-push.ts).
+  es.onopen = () => pushOpen(true);
+  es.onerror = () => pushOpen(false);
+  es.addEventListener("changed", (e) => pushed(String((e as MessageEvent).data)));
 }
 export const useBackdrops = (): BackdropsView | null => useSyncExternalStore((l) => (viewListeners.add(l), () => void viewListeners.delete(l)), () => view, () => null);
 /** A backdrop's file, as served (walled off): `?v=` its newest change, so a saved one loads afresh. */

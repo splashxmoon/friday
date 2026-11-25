@@ -11,7 +11,11 @@ import { argsOf } from "./args.js";
 import { CodeEditor, CodeReader, QuickOpen } from "./Editor.js";
 import type { Send } from "./useSession.js";
 import { Icon, type IconName } from "./icons.js";
-import { ContextMenu, relTime } from "./ui.js";
+import { ContextMenu, SkeletonCode, SkeletonLines, SkeletonTree, relTime } from "./ui.js";
+import { CircleAlertIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/dass/EmptyState";
+import { useFullFiles } from "./patchSource.js";
 import { isLocal } from "./edition.js";
 import { openInCode } from "./ide/mode.js";
 import { useFocus } from "./focusStore.js";
@@ -343,9 +347,18 @@ export function TreePanel({
           <TreeEmpty icon="folder" title="No folder yet" line="Attach one with the folder button in the composer, or connect a computer from the session's header, and its files show here." />
         ) : err ? (
           // A folder that isn't there yet is a state, not a failure: said in the panel's quiet grey, red kept for what broke.
-          <p className={/no folder/i.test(err) ? "muted small" : "error small"}>{err}</p>
+          /no folder/i.test(err) ? (
+            <p className="muted small">{err}</p>
+          ) : (
+            <p className="error small tree-failed" role="alert">
+              {err}{" "}
+              <button type="button" className="link-btn" disabled={loading} onClick={load}>
+                {loading ? "Trying…" : "Try again"}
+              </button>
+            </p>
+          )
         ) : !paths ? (
-          <p className="muted small">Reading the folder…</p>
+          <SkeletonTree label="Reading the folder" />
         ) : !rows.length ? (
           q || onlyChanged ? (
             <TreeEmpty icon="search" title={q ? `Nothing called “${q}”` : "No changed files"} line={q ? "Try part of the name, or clear the search." : "Files an agent changes in this session show here."} />
@@ -546,6 +559,8 @@ function FileView({
 }) {
   const [text, setText] = useState<string | null>(null);
   const [err, setErr] = useState("");
+  /** Bumped by Try again on a file that couldn't be read. */
+  const [tries, setTries] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState(true);
@@ -553,6 +568,10 @@ function FileView({
   const markdown = /\.(md|markdown|mdx)$/i.test(path);
   // A picture shows as itself, from the session's folders, not as text that can't be read (Arun, 2026-11-18).
   const picture = PICTURE_FILE.test(path) || VIDEO_FILE.test(path); // and a video plays (2026-11-19)
+
+  // Its change's text, fetched as it is shown: the session came with its change sets by name and counts (patchSource.ts; spec 13).
+  const fetched = useFullFiles(change ? [change.file] : [], !!change && !editing);
+  const changed = fetched.files[0] ?? change?.file;
 
   // Another file starts fresh. Said while drawing: an effect would also run each time a kept Tree is shown again.
   const [viewOf, setViewOf] = useState(path);
@@ -590,7 +609,7 @@ function FileView({
     return () => {
       live = false;
     };
-  }, [path, editing, !!change, sid, invite]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [path, editing, !!change, sid, invite, tries]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dirty = draft !== undefined && draft !== text;
   const save = async () => {
@@ -629,7 +648,13 @@ function FileView({
             </button>
           )}
         </p>
-        <FileDiff file={<span className="diff-path">{path}</span>} lines={patchLines(change.file.patch)} status="complete" defaultOpen maxHeight={420} copyText={change.file.patch} />
+        {changed && !changed.patch && fetched.loading ? (
+          <div className="tree-open-wait" aria-label="Fetching the change">
+            <SkeletonLines lines={6} />
+          </div>
+        ) : (
+          <FileDiff file={<span className="diff-path">{path}</span>} lines={patchLines(changed?.patch ?? "")} status="complete" defaultOpen maxHeight={420} copyText={changed?.patch ?? ""} />
+        )}
       </div>
     );
   }
@@ -638,20 +663,39 @@ function FileView({
   const asPage = markdown && text !== null;
   return (
     <div className={`tree-open${asPage ? " as-page" : ""}`}>
-      {err && <p className="error small">{err}</p>}
+      {/* A save that failed, over the text that is still there; a read that failed is said below, with Try again. */}
+      {err && text !== null && <p className="error small">{err}</p>}
       {asPage ? (
         <div className="md-page">
           <MarkdownDoc text={value} path={path} />
         </div>
       ) : text === null && !err ? (
-        <p className="muted small">Reading…</p>
+        <SkeletonCode lines={14} label={`Reading ${path.split("/").pop() ?? path}`} />
       ) : text === null ? (
-        // Nothing was read, so there is nothing to edit or save: only the reason, and the diff when there is one.
-        change ? (
-          <button type="button" className="rsp-text-btn" onClick={() => setEditing(false)}>
-            Show the diff instead
-          </button>
-        ) : null
+        // Nothing was read, so there is nothing to edit or save: the reason, a way to read it again, and the diff when there is one.
+        <EmptyState
+          small
+          className="tree-read-failed"
+          tone="bad"
+          icon={<CircleAlertIcon />}
+          title={/^There's no file at /.test(err) ? "This file isn't there" : "Couldn't read this file"}
+          action={
+            <>
+              {!/^There's no file at /.test(err) && (
+                <Button variant="outline" size="sm" onClick={() => (setErr(""), setTries((n) => n + 1))}>
+                  Try again
+                </Button>
+              )}
+              {change && (
+                <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+                  Show the diff instead
+                </Button>
+              )}
+            </>
+          }
+        >
+          <span role="alert">{err}</span>
+        </EmptyState>
       ) : canEdit && send ? (
         <>
           <CodeEditor path={path} value={value} line={line} onChange={onDraft} onSave={() => void save()} />

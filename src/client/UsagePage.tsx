@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Limits } from "../runner/limits.js";
 import { shortTokens, USAGE_TOOLS, type CarriedEntry, type Tokens, type UsageDay, type UsageTool } from "../tool-usage.js";
 import { EngineMark } from "./BrandMarks.js";
@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Choice, EmptyState, PageHeader, SectionHeader, surface } from "@/components/dass";
 import { LimitsHub } from "./LimitsHub.js";
+import { AnimatedNumber } from "@/components/motion/animated-number";
 
 /**
  * Every agent a workspace runs, in tokens: Friday's own and the coding tools people bring (Claude Code, Codex, Cursor), side by
@@ -111,17 +112,34 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
   const { state: machine } = useMachine(identity);
   const installed = new Set<string>(machine.tools.filter((t) => t.path).map((t) => t.tool));
 
+  // The figures, read for the range picked, and again while agents spend: every minute the window is in sight, when it comes back
+  // into sight, and when something is answered or finished (friday:attention). The old figures stay up until the new ones land, so
+  // a re-read never flashes the placeholders; one that fails with figures on the page keeps them and says nothing.
+  const [beat, setBeat] = useState(0);
+  useEffect(() => {
+    const again = () => document.visibilityState === "visible" && setBeat((n) => n + 1);
+    const t = setInterval(again, 60_000);
+    document.addEventListener("visibilitychange", again);
+    addEventListener("friday:attention", again);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", again);
+      removeEventListener("friday:attention", again);
+    };
+  }, []);
+  const shownRange = useRef<Range | null>(null);
   useEffect(() => {
     let live = true;
-    setFailed("");
+    const quiet = beat > 0 && shownRange.current === range;
+    if (!quiet) setFailed("");
     fetch(`/api/workspace/tool-usage?days=${range}`, { credentials: "same-origin" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Friday didn't answer."))))
-      .then((b) => live && setData(b))
-      .catch((e) => live && setFailed(e instanceof TypeError ? "Friday can't be reached. Check your connection." : (e as Error).message));
+      .then((b) => live && ((shownRange.current = range), setData(b), setFailed("")))
+      .catch((e) => live && !quiet && setFailed(e instanceof TypeError ? "Friday can't be reached. Check your connection." : (e as Error).message));
     return () => {
       live = false;
     };
-  }, [range, tries]);
+  }, [range, tries, beat]);
 
   const days = data?.days ?? [];
   const totals = useMemo(() => {
@@ -212,9 +230,10 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                   <div className="us-act-side">
                     <div className="us-act-total">
                       <span className="us-k">Used</span>
-                      <span className="us-big num">{shortTokens(total)}</span>
+                      {/* Counted up to as they land and as agents spend, not swapped in place. */}
+                      <AnimatedNumber className="us-big num" value={total} format={shortTokens} startOnView={false} duration={0.9} />
                       <span className="us-s num">
-                        {turns.toLocaleString()} turn{turns === 1 ? "" : "s"}, read fresh and written
+                        <AnimatedNumber value={turns} startOnView={false} duration={0.9} /> turn{turns === 1 ? "" : "s"}, read fresh and written
                       </span>
                     </div>
                     <ul className="us-split" aria-label="Tokens by agent">
@@ -225,7 +244,9 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                               <i className={`key tool-${t}`} />
                               {NAMES[t]}
                             </span>
-                            <b className="num">{shortTokens(sum(totals.by[t]))}</b>
+                            <b className="num">
+                              <AnimatedNumber value={sum(totals.by[t])} format={shortTokens} startOnView={false} duration={0.9} />
+                            </b>
                           </span>
                           <span className="us-split-track">
                             <i className={`usage-part tool-${t}`} style={{ width: `${Math.max(1.5, (sum(totals.by[t]) / total) * 100)}%` }} />

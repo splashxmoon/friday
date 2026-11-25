@@ -34,6 +34,8 @@ export interface BrowserAnswer {
 export interface BrowserDriver {
   /** `lane`: the agent asking, whose own page this is (browserKey). */
   act(sid: string, ask: BrowserAsk, signal?: AbortSignal, lane?: string): Promise<BrowserAnswer>;
+  /** The agent's page didn't answer in time (browserCall): put right what can be, a page of its own closed for a fresh one. */
+  wedged?(sid: string, lane: string): void;
 }
 
 let driver: BrowserDriver | null = null;
@@ -99,17 +101,61 @@ export function browserAsk(args: Record<string, unknown>): BrowserAsk | string {
   return ask;
 }
 
-/** The tool's call: checked, then handed to the desktop app, for the agent on `lane`. */
-export async function browserCall(sid: string, args: Record<string, unknown>, signal?: AbortSignal, lane: string = MAIN_LANE): Promise<BrowserAnswer> {
+/**
+ * How long one action may take before the agent hears the page didn't answer (Arun, 2026-11-24: "we need to ensure long horizon
+ * tasks/ long running tasks are stable and not getting hung up or stuck"). Two agents testing a page of the app they were building
+ * waited 19 and 4 minutes on a click and a read that never came back (a page stuck in a script or on a dialog answers no script),
+ * their turns held with them, and a wake and a hold handed to them unread.
+ */
+export const BROWSER_DEADLINE_MS: Partial<Record<BrowserAction, number>> & { other: number } = { open: 45_000, screenshot: 40_000, other: 30_000 };
+
+/** What the agent hears when its call stopped short: the reason it was stopped for, said, or that it was. */
+const stoppedFor = (signal: AbortSignal): BrowserAnswer => ({ output: typeof signal.reason === "string" ? signal.reason : "Stopped.", isError: true });
+
+/** Each agent's actions on its page, one after another (browserKey): two clicks sent at once land in order, not in each other. */
+const lines = new Map<string, Promise<unknown>>();
+
+/** The tool's call: checked, then handed to the desktop app, for the agent on `lane`; one at a time for each agent, each in time. */
+export async function browserCall(sid: string, args: Record<string, unknown>, signal?: AbortSignal, lane: string = MAIN_LANE, deadlines = BROWSER_DEADLINE_MS): Promise<BrowserAnswer> {
   const d = driver;
   if (!d) return { output: "Friday's browser is in the Friday desktop app, and this Friday isn't running in it.", isError: true };
   const ask = browserAsk(args);
   if (typeof ask === "string") return { output: ask, isError: true };
-  try {
-    return await d.act(sid, ask, signal, lane);
-  } catch (e) {
-    return { output: `The browser couldn't do that: ${(e as Error).message}`, isError: true };
-  }
+  const key = browserKey(sid, lane);
+  const mine = (lines.get(key) ?? Promise.resolve()).then(() => actInTime(d, sid, lane, ask, signal, deadlines[ask.action] ?? deadlines.other));
+  const tail = mine.catch(() => {});
+  lines.set(key, tail);
+  void tail.then(() => lines.get(key) === tail && lines.delete(key));
+  if (!signal) return mine;
+  // Stopped while waiting its turn behind another action: said at once, not after the one before it ends.
+  if (signal.aborted) return stoppedFor(signal);
+  return Promise.race([mine, new Promise<BrowserAnswer>((resolve) => signal.addEventListener("abort", () => resolve(stoppedFor(signal)), { once: true }))]);
+}
+
+/** One action, given `ms`: past that the agent hears so, and the driver puts its page right (wedged). */
+function actInTime(d: BrowserDriver, sid: string, lane: string, ask: BrowserAsk, signal: AbortSignal | undefined, ms: number): Promise<BrowserAnswer> {
+  if (signal?.aborted) return Promise.resolve(stoppedFor(signal));
+  const ac = new AbortController();
+  const relay = () => ac.abort(signal?.reason);
+  signal?.addEventListener("abort", relay, { once: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return new Promise<BrowserAnswer>((resolve) => {
+    timer = setTimeout(() => {
+      ac.abort("deadline");
+      try {
+        d.wedged?.(sid, lane);
+      } catch {
+        // Putting it right is a courtesy: the agent hears either way.
+      }
+      resolve({
+        output: `The page didn't answer within ${Math.round(ms / 1000)} seconds, so Friday stopped waiting: it may be showing a dialog, stuck in a script, or still loading. Nothing after that was done. Read it again; if it still doesn't answer, open it again to load it fresh.`,
+        isError: true,
+      });
+    }, ms);
+    timer.unref?.();
+    ac.signal.addEventListener("abort", () => signal?.aborted && resolve(stoppedFor(signal)), { once: true });
+    d.act(sid, ask, ac.signal, lane).then(resolve, (e: Error) => resolve({ output: `The browser couldn't do that: ${e.message}`, isError: true }));
+  }).finally(() => (clearTimeout(timer), signal?.removeEventListener("abort", relay)));
 }
 
 // ── What the desktop app decides for each page (local/desktop-browser.ts), here where it can be tested ─────────────────────

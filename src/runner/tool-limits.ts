@@ -4,7 +4,7 @@ import { devNull, homedir } from "node:os";
 import path from "node:path";
 import type { EngineTool } from "../types.js";
 import type { LimitWindow } from "./limits.js";
-import { childEnv, findBin, launcher, loginStatusCached, toolEnv } from "./adapters.js";
+import { childEnv, findBin, launcher, loginStatusCached } from "./adapters.js";
 import { execCli } from "./spawn-cli.js";
 
 /**
@@ -852,7 +852,7 @@ async function runAgyUsage(bin: string): Promise<ToolAllowance | null> {
   if (Date.now() - agyRanAt < AGY_EVERY_MS) return (await keptAll()).antigravity ? kept("antigravity", "Antigravity's usage renews the next time it runs.") : null;
   const how = await launcher(bin).catch(() => null);
   if (!how) return kept("antigravity", "Antigravity's usage didn't answer just now.");
-  const env = toolEnv("antigravity", { ...childEnv(), ...how.env, AGY_CLI_DISABLE_AUTO_UPDATE: "true" });
+  const env = { ...childEnv(), ...how.env, AGY_CLI_DISABLE_AUTO_UPDATE: "true" };
   if (!agyVersions.has(bin)) {
     agyVersions.set(
       bin,
@@ -891,6 +891,9 @@ async function runAgyUsage(bin: string): Promise<ToolAllowance | null> {
  */
 async function readAntigravity(): Promise<ToolAllowance | null> {
   const bin = await findBin("antigravity");
+  // On a Gemini API key, agy bills the key, not the Google sign-in's plan (agy 1.5.12 and later offer Gemini 4 there): said as Gemini
+  // CLI's is (Arun, 2026-11-24: "make friday pass the gemini api key to agy").
+  if (bin && process.env.GEMINI_API_KEY) return { plan: "API key", windows: [], at: Date.now(), why: "Antigravity runs on a Gemini API key here: its usage is in Google AI Studio." };
   const login = await agyLogin();
   if (!bin && !login) return null;
   if (login && (login.expiresAt === null || login.expiresAt > Date.now() + 60_000)) {

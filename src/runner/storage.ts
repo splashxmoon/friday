@@ -3,7 +3,7 @@ import { lstat, mkdir, readFile, readdir, rename, rm, stat, utimes } from "node:
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { dropWorktree, inSparePool, isSpareCopy, madeHere, sweepWorktrees, worktreeRoot } from "./git.js";
+import { dropWorktree, inSparePool, inWorktreeLine, isSpareCopy, madeHere, sweepWorktrees, worktreeRoot } from "./git.js";
 import { releaseStack } from "./stack.js";
 
 /**
@@ -71,11 +71,48 @@ async function walkSize(p: string): Promise<number> {
   return total;
 }
 
-/** A copy's folders, by what it is. */
+/**
+ * A copy's folders, by what it is: Friday's own (`<repo>-<id>`), and any other git checkout in the worktrees folder, which agents
+ * make there by name (`git worktree add ~/.friday/worktrees/edge-c2-adapt`; 16 on his Mac, 950 MB, 2026-11-24, that nothing
+ * measured or cleared). Those are never marked as made here, so they are only ever "older" or "recent": put away on his say.
+ */
 async function copies(): Promise<string[]> {
   const root = worktreeRoot();
   const names = await readdir(root).catch(() => [] as string[]);
-  return names.filter((n) => /-[0-9a-f]{8}$/.test(n)).map((n) => path.join(root, n));
+  const out: string[] = [];
+  for (const n of names) {
+    const dir = path.join(root, n);
+    if (/-[0-9a-f]{8}$/.test(n)) out.push(dir);
+    else if (/^gitdir:/.test((await readFile(path.join(dir, ".git"), "utf8").catch(() => "")).trimStart())) out.push(dir);
+  }
+  return out;
+}
+
+/**
+ * Claude Code's record of a lane's conversation is kept by folder (~/.claude/projects/<the folder, every other character a "-">),
+ * and stays when the copy goes: 37 folders, 409 MB on his Mac (2026-11-24, "past sessions that were deleted"). A record whose copy
+ * is gone can't be resumed (Claude Code looks a conversation up by the folder it runs in), so it goes as the copy does: to the
+ * trash for a week, a day after anything last wrote to it. Only records of folders in the worktrees folder, never anyone's own.
+ */
+const claudeProjects = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), ".claude"), "projects");
+export const claudeKey = (p: string): string => p.replace(/[^a-zA-Z0-9]/g, "-");
+const transcriptsTrash = () => path.join(trashRoot(), "transcripts");
+export async function goneTranscripts(graceMs = DAY): Promise<string[]> {
+  const root = worktreeRoot();
+  const pre = claudeKey(root) + "-";
+  // Every folder there now, copy or not: a record of a folder in one (a project a level down) is kept too.
+  const live = (await readdir(root).catch(() => [] as string[])).map((n) => claudeKey(path.join(root, n)));
+  const out: string[] = [];
+  for (const name of await readdir(claudeProjects()).catch(() => [] as string[])) {
+    if (!name.startsWith(pre) || live.some((k) => name === k || name.startsWith(k + "-"))) continue;
+    const at = path.join(claudeProjects(), name);
+    const st = await stat(at).catch(() => null);
+    if (!st?.isDirectory()) continue;
+    const inside = await readdir(at).catch(() => [] as string[]);
+    const times = await Promise.all(inside.map((f) => stat(path.join(at, f)).then((x) => x.mtimeMs, () => 0)));
+    if (Date.now() - Math.max(st.mtimeMs, ...times) >= graceMs) out.push(at);
+  }
+  return out;
 }
 
 /**
@@ -117,7 +154,7 @@ export async function retireCopy(dir: string): Promise<"dropped" | "trashed" | "
   // git forgets the copy (its branch stays), so `git worktree list` doesn't name a folder that isn't there.
   if (link?.there) {
     const common = path.resolve(link.to, "..", "..");
-    await run("git", ["--git-dir", common, "worktree", "prune"]).catch(() => undefined);
+    await inWorktreeLine(common, () => run("git", ["--git-dir", common, "worktree", "prune"])).catch(() => undefined);
   }
   return "trashed";
 }
@@ -215,9 +252,16 @@ export async function tidy(o: { inUse: ReadonlySet<string>; referenced: Readonly
       else if (r === "trashed") res.trashed++;
     }
   }
-  // The trash: a week for copies, a month for skills, from when each went in.
+  // Claude Code's records of copies that are gone.
+  for (const at of await goneTranscripts(grace)) {
+    await mkdir(transcriptsTrash(), { recursive: true });
+    const to = path.join(transcriptsTrash(), `${path.basename(at)}-${Date.now()}`);
+    await rename(at, to).then(() => res.files++, () => undefined);
+  }
+  // The trash: a week for copies and records, a month for skills, from when each went in.
   for (const [dir, days] of [
     [copiesTrash(), TRASH_DAYS],
+    [transcriptsTrash(), TRASH_DAYS],
     [path.join(trashRoot(), "skills"), 30],
   ] as const) {
     for (const name of await readdir(dir).catch(() => [] as string[])) {
@@ -289,7 +333,7 @@ export async function clearBrowserCaches(): Promise<number> {
   return Math.max(0, before - after);
 }
 
-export type PileId = "copies" | "spares" | "leftover" | "older" | "trash" | "cache" | "index" | "shots" | "logs" | "models" | "other";
+export type PileId = "copies" | "spares" | "leftover" | "older" | "transcripts" | "trash" | "cache" | "index" | "shots" | "logs" | "models" | "other";
 export interface Pile {
   id: PileId;
   bytes: number;
@@ -331,12 +375,16 @@ export async function measure(referenced: ReadonlySet<string> | null, inUse: Rea
   const isDue = (k: { kind: Kind; age: number }) => (k.kind === "leftover" && k.age >= DAY) || ((k.kind === "broken" || k.kind === "broken-temp") && k.age >= 60 * 60_000);
   // And what the trash holds past its week, which a clean-up empties too.
   const expired: string[] = [];
-  for (const name of await readdir(copiesTrash()).catch(() => [] as string[])) {
-    const at = path.join(copiesTrash(), name);
-    const when = await trashedAt(at);
-    if (when && Date.now() - when > TRASH_DAYS * DAY) expired.push(at);
-  }
-  const due = sizes.reduce((a, b, i) => a + (isDue(kinds[i]!) ? b : 0), 0) + (expired.length ? (await sizeOf(expired)).reduce((a, b) => a + b, 0) || expired.length : 0);
+  for (const dir of [copiesTrash(), transcriptsTrash()])
+    for (const name of await readdir(dir).catch(() => [] as string[])) {
+      const at = path.join(dir, name);
+      const when = await trashedAt(at);
+      if (when && Date.now() - when > TRASH_DAYS * DAY) expired.push(at);
+    }
+  // Claude Code's records of copies that are gone, a day on (tidy): outside Friday's folder, so counted on their own.
+  const gone = await goneTranscripts();
+  const transcripts = gone.length ? (await sizeOf(gone)).reduce((a, b) => a + b, 0) : 0;
+  const due = sizes.reduce((a, b, i) => a + (isDue(kinds[i]!) ? b : 0), 0) + transcripts + (expired.length ? (await sizeOf(expired)).reduce((a, b) => a + b, 0) || expired.length : 0);
   const soon = sizes.reduce((a, b, i) => a + (pileOf(kinds[i]!.kind) === "leftover" && !isDue(kinds[i]!) ? b : 0), 0);
   const h = home();
   const [trash, index, shots, logs, models] = await sizeOf([trashRoot(), path.join(h, "snapshot-index"), shotsDir(), path.join(h, "logs"), path.join(h, "models")]);
@@ -347,6 +395,7 @@ export async function measure(referenced: ReadonlySet<string> | null, inUse: Rea
     { id: "leftover", bytes: sum("leftover"), count: count("leftover") },
     { id: "older", bytes: sum("older"), count: count("older") },
     { id: "spares", bytes: sum("spares"), count: count("spares") },
+    { id: "transcripts", bytes: transcripts, count: gone.length },
     { id: "trash", bytes: trash! },
     { id: "cache", bytes: cache },
     { id: "index", bytes: index! },
@@ -357,7 +406,7 @@ export async function measure(referenced: ReadonlySet<string> | null, inUse: Rea
   // The rest of Friday's folder: its settings, uploads, keys. The worktrees folder and the trash are inside it unless moved.
   const inside = (p: string) => p === h || p.startsWith(h + path.sep);
   const copiesIn = inside(worktreeRoot());
-  const counted = piles.filter((p) => p.id !== "cache" && (copiesIn || !["copies", "leftover", "older", "spares"].includes(p.id))).reduce((a, p) => a + p.bytes, 0);
+  const counted = piles.filter((p) => p.id !== "cache" && p.id !== "transcripts" && (copiesIn || !["copies", "leftover", "older", "spares"].includes(p.id))).reduce((a, p) => a + p.bytes, 0);
   piles.push({ id: "other", bytes: Math.max(0, whole - counted) });
   return { piles, total: piles.reduce((a, p) => a + p.bytes, 0), home: h, due, soon };
 }

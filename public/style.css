@@ -1900,9 +1900,11 @@ body.resizing-x .bench-panel { transition: none; }
    is up, and the panel's own row leads, with its way back (shrink, or Back to chat over a narrow window's chat). On the desktop app
    that row stands where the header stood: its height, its middle on the Mac's traffic lights' line, and room at the right for
    Windows' and Linux's own buttons, as the header kept (.session-view > .topbar, below). */
-.session-view:has(> .sv-body > .bench-panel.full) > .topbar { display: none; }
+/* Only while it is up: closed (Back to chat over a narrow window), the panel keeps its classes under `hidden`, and the header
+   and the thread card stayed folded away with nothing in their place until the window was widened again. */
+.session-view:has(> .sv-body > .bench-panel.full:not([hidden])) > .topbar { display: none; }
 /* The chat's thread card (thread-card.css) goes with the chat under it: drawn above the panel, it lay over the panel's own buttons. */
-.session-view:has(> .sv-body > .bench-panel.full) .tc { display: none; }
+.session-view:has(> .sv-body > .bench-panel.full:not([hidden])) .tc { display: none; }
 html.desktop .session-view > .sv-body > .bench-panel.full > .bench-tabs { min-height: 38px; }
 html.desktop-mac.lights-low .session-view > .sv-body > .bench-panel.full > .bench-tabs { min-height: calc(2 * var(--lights-cy, 23px) - 2px); }
 html.desktop:not(.desktop-mac):not(.rail-only) .session-view > .sv-body > .bench-panel.full > .bench-tabs { padding-right: calc(var(--band-right, 146px) + 4px); }
@@ -7621,6 +7623,10 @@ img.set-mark { border-color: transparent; }
 .review-page.inbox .page-head { flex: none; }
 
 
+/* Code Review with no GitHub yet (CodeReview.tsx NoGitHub): the agents' ready branches rise in as they are read. */
+.rv-ready-row { animation: tm-rise var(--t-open) var(--ease-out) both; }
+.rv-ready-meta > * + *::before { content: "·"; margin-right: 6px; }
+@media (prefers-reduced-motion: reduce) { .rv-ready-row { animation: none; } }
 .rv-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 16px; }
 .rv-queue { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel); overflow: hidden; }
 .rv-queue > * { flex: none; }
@@ -7886,6 +7892,15 @@ img.set-mark { border-color: transparent; }
 .sk-row:last-child { border-bottom: 0; }
 .sk-row .sk-end { margin-left: auto; }
 .sk-head { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
+/* A file or a diff being read (SkeletonCode): the gutter's numbers, then the line, indented as code is. */
+.sk-code { display: flex; flex-direction: column; gap: 9px; padding: 10px 4px; }
+.sk-code-line { display: flex; align-items: center; gap: 14px; }
+.sk-code-ind-1 { margin-left: 16px; }
+.sk-code-ind-2 { margin-left: 32px; }
+.sk-code-ind-3 { margin-left: 48px; }
+/* A folder's listing being read (SkeletonTree): rows of the tree's own height. */
+.sk-tree { display: flex; flex-direction: column; padding: 4px 0; }
+.sk-tree-row { display: flex; align-items: center; gap: 8px; height: 26px; }
 /* A session opening: its header, a few turns of the conversation, and the box to write in. */
 .sk-session { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .sk-session-bar { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
@@ -9681,6 +9696,10 @@ html.desktop :is(#band-left, #band-slot) :is(.popover, [role="dialog"], [role="m
 .preview-kind button:hover:not(.on) { color: var(--ink); }
 .preview-kind button.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .16), 0 0 0 1px var(--border-strong) inset; }
 .preview-kind button.on svg { opacity: 1; }
+/* Icons only: two square keys, the size of the tabs beside them. */
+.preview-kind button { width: 26px; padding: 0; justify-content: center; }
+.ios-bar > .preview-kind, .bw-kinds > .preview-kind { margin: 0; align-self: center; }
+.ios-bar-lead { padding: 8px 10px 4px; }
 .preview-kind button:focus-visible { outline: 2px solid var(--violet-border); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { .preview-kind button { transition: none; } }
 .ios-preview { position: relative; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; padding: 8px 10px 10px; }
@@ -10518,7 +10537,7 @@ html.desktop .home { padding-top: calc(max(7.5vh, 48px) + 40px); }
 .dock-plan { position: static !important; margin-left: auto; width: auto; max-width: 100%; z-index: auto; }
 /* With a panel opened full over the chat, the chat's own row isn't there to be seen: neither is its Team tasks (Arun, 2026-10-20:
    folded, the chip still drew over a full-screen file panel, as a flex item keeps its z-index even when it isn't positioned). */
-.session-view:has(.bench-panel.full) .dock-plan { display: none; }
+.session-view:has(.bench-panel.full:not([hidden])) .dock-plan { display: none; }
 /* Open, it floats again, so the conversation isn't pushed up (Arun, same day): anchored to the right of the row above the
    input, inside the chat's own column (never wider than it, so a side panel or a split can't have it spill over), rising
    over the conversation's end rather than taking a row of it. */
@@ -11257,9 +11276,10 @@ body.resizing .feed-item { content-visibility: auto; }
 html.desktop-mac[data-band="session"]:not(.bench-docked) #band-left { right: calc(var(--band-right, 12px) + var(--slot-w, 548px) + 16px); }
 /* Web / iOS at the right end of the browser's row of pages (Preview kindSlot); on the iOS side, which has no such row, on a
    line of its own at the right, where it was on the web side, so switching back finds it in the same place. */
-.bw-tabs .bw-kinds { display: flex; align-items: center; margin-left: auto; padding: 0 2px 2px 8px; flex: none; }
+.bw-tabs .bw-kinds { display: flex; align-items: center; padding: 0 6px 0 0; flex: none; }
+.bw-tabs .bw-kinds:empty { display: none; }
 .preview-kind.in-row, .preview-kind-row .preview-kind { margin: 0; align-self: center; }
-.preview-kind-row { display: flex; justify-content: flex-end; padding: 6px 8px 2px; }
+.preview-kind-row { display: flex; padding: 8px 10px 4px; }
 
 /* The + that adds an agent, easy to find (Arun, 2026-10-24: "make this visible"): a faint grey plus on a faint dashed edge
    all but vanished on a dark page. The plus is in the text's own colour, a step down from the names, thicker; above the chat
@@ -12143,9 +12163,13 @@ html:not(.dark) .subs-pop { box-shadow: 0 16px 40px -16px rgb(0 0 0 / .18); }
     var(--tray) !important;
   scrollbar-width: thin;
 }
-.activity-main div:has(> table) > table { width: max-content; min-width: 100%; border-radius: 0; overflow: visible; background: transparent; }
-.activity-main div:has(> table) > table :is(th, td:first-child) { white-space: nowrap; }
-.activity-main div:has(> table) > table td { max-width: 340px; overflow-wrap: anywhere; }
+/* The table fits the column and its long text wraps between words; it scrolls sideways only when its columns, each at least a
+   readable width and never narrower than its longest word, cannot fit. The first column used to stay on one line, so a long task
+   ran under the next columns (a table cell ignores max-width), and "anywhere" broke names mid-word ("Antigravit / y"). */
+.activity-main div:has(> table) > table { width: auto; min-width: 100%; border-radius: 0; overflow: visible; background: transparent; }
+.activity-main div:has(> table) > table th { white-space: nowrap; }
+.activity-main div:has(> table) > table td { min-width: 96px; overflow-wrap: break-word; word-break: normal; }
+.activity-main div:has(> table) > table td:first-child { min-width: 180px; }
 .activity-main div:has(> table) > table thead { background: transparent; }
 
 .agent-question { border-radius: var(--tray-r) !important; border: 1px solid var(--tray-edge) !important; background: var(--tray) !important; box-shadow: none !important; }
@@ -13350,7 +13374,17 @@ a.sd-go { padding-right: 14px; }
 }
 /* Narrower still: the line counts go (the file count stays), then Ask, which only puts you in the box below. */
 @container change-card (max-width: 340px) { .cc-head .cc-toggle > :is(.diff-add, .diff-del) { display: none; } }
-@container change-card (max-width: 260px) { .cc-head > .cc-btn.line:has(> .cc-short) { display: none; } }
+/* At 320 (a 390-wide phone's chat), so "1 file" is never cut to "1 fil" beside the buttons (spec 13 polish); it was 260. */
+@container change-card (max-width: 320px) { .cc-head > .cc-btn.line:has(> .cc-short) { display: none; } }
+/* Open in Code says its key while there is room; at a phone's width it is its mark alone, so Commit and its menu stay whole beside it
+   (spec 13 polish: at 420, 390 and 360 the head ran past the card). */
+.cc-code-ic { display: none; }
+@container change-card (max-width: 440px) { .cc-head > .cc-code > kbd { display: none; } }
+@container change-card (max-width: 400px) {
+  .cc-head > .cc-code { width: 28px; padding: 0; justify-content: center; }
+  .cc-head > .cc-code > .cc-code-word { display: none; }
+  .cc-head > .cc-code > .cc-code-ic { display: block; }
+}
 .cc-head > b { color: var(--ink); font-weight: 600; }
 .cc-head .diff-add, .cc-head .diff-del { font-size: 13px; }
 .cc-tests { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); font-size: 12px; }
@@ -13423,6 +13457,8 @@ li.open > .cc-row .cc-car { transform: rotate(90deg); }
 .sb-row .state-ring { width: 12px; height: 12px; }
 .sb-row .state-ring .pr[data-pr] { --pr-size: 4px !important; }
 .sb-done { color: color-mix(in srgb, var(--green) 55%, var(--text-muted)); }
+.sb-idle { color: color-mix(in srgb, var(--ink) 28%, transparent); }
+html.dark .sb-idle { color: color-mix(in srgb, var(--ink) 30%, transparent); }
 .sb-done.new { color: var(--green); }
 /* New since you looked, or marked unread (audit CODE-8): an accent dot in the row's left margin and the name in semibold. */
 .sb-row > .flex { position: relative; }
@@ -14097,7 +14133,10 @@ html.dark .acg-bar-track > i.red { background: #f87171; }
 .oss-agent-plus { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1px dashed var(--border-strong); color: var(--text-muted); flex: none; }
 .oss-agent-plus svg { width: 13px; height: 13px; }
 /* The usage question and the word about Friday Team, at the list's foot where the dock was. */
-.sb-list-foot { flex: none; margin-top: auto; padding: 8px 4px 0; border-top: 1px solid var(--border); }
+/* No line over it (Arun, 2026-11-24: "get rid of this random horinztonal line at the bottom of the side bar"): the tip's own card sets
+   it apart, and once the tip is closed the foot is gone, not left as an empty band under a rule. */
+.sb-list-foot { flex: none; margin-top: auto; padding: 8px 4px 0; }
+.sb-list-foot:not(:has(> *)) { display: none; }
 
 /* A teammate's finished turn (Crew overhaul 3A, 2026-11-11): its steps folded into one line, then what it changed as a result
    card, Changed / Checked / Branch in rows, with the whole review a press away. */
@@ -15158,6 +15197,12 @@ html.desktop :is(.composer, .composer-dock) :is(textarea, input, [contenteditabl
 .sb-group-end { padding-right: 22px; }
 .sb-repo-group .sb-group-end { padding-right: 0; transition: opacity var(--t-hover) var(--ease-out); }
 .sb-repo-group .group\/label:hover .sb-group-end { opacity: 0; }
+/* Needs you's close (Arun, 2026-11-24: "it should appear on hover where the number is"): hidden until the row is hovered or the
+   button has keyboard focus, then in the count's place while the count steps aside. */
+.sb-group-needs .sb-group-end { padding-right: 0; transition: opacity var(--t-hover) var(--ease-out); }
+.sb-group-needs .group\/label:hover .sb-group-end, .sb-group-needs .group\/label:has([data-sidebar="group-action"]:focus-visible) .sb-group-end { opacity: 0; }
+.sb-group-needs [data-sidebar="group-action"] { opacity: 0; transition: opacity var(--t-hover) var(--ease-out); }
+.sb-group-needs .group\/label:hover [data-sidebar="group-action"], .sb-group-needs [data-sidebar="group-action"]:focus-visible { opacity: 1; }
 /* The Agents list's rows a size up (Arun, 2026-11-19: "make these tab session things bigger too"): bigger faces (Sidebar.tsx), a
    taller row, the name and its line a step larger. Compact keeps its own smaller size. */
 .oss-crew-scroll:not(.compact) .oss-crew-row { gap: 12px; min-height: 58px; padding: 8px 10px; }

@@ -184,17 +184,22 @@ function useClearBand(navRef: RefObject<HTMLDivElement | null>) {
     const nav = navRef.current;
     const band = document.getElementById("band-left");
     if (!nav || !band) return;
+    // The band is moved clear of the buttons (its left margin), never just padded: padding keeps the band's box, and so its drag
+    // region, over them, and the Mac window lets a drag region win over a button whatever is drawn on top. Only the Agents button's
+    // icon, left of the band, took a click (Arun, 2026-11-24: "only the svg icon is clickable ... the whole button should be
+    // clickable"). Where the band would start without the margin is worked out from where it is, so moving it never sets this off.
     const fit = () => {
+      const z = uiZoom();
+      const had = parseFloat(band.style.marginLeft) || 0;
       const n = nav.getBoundingClientRect();
       const b = band.getBoundingClientRect();
+      const base = b.left - had * z;
       // Hidden (the web app), or not on the band's row: nothing to clear.
-      const over = n.width && n.bottom > b.top && n.top < b.bottom ? n.right + 10 - b.left : 0;
-      const pad = over > 0 ? `${Math.ceil(over / uiZoom())}px` : "";
-      if (band.style.paddingLeft !== pad) band.style.paddingLeft = pad;
+      const over = n.width && n.bottom > b.top && n.top < b.bottom ? n.right + 10 - base : 0;
+      const m = over > 0 ? `${Math.ceil(over / z)}px` : "";
+      if (band.style.marginLeft !== m) band.style.marginLeft = m;
     };
     fit();
-    // The buttons change width with the mode's word; the band changes width whenever its left moves (its right edge is fixed),
-    // and padding leaves its border box alone, so this never sets itself off.
     const ro = new ResizeObserver(fit);
     ro.observe(nav, { box: "border-box" });
     ro.observe(band, { box: "border-box" });
@@ -202,7 +207,7 @@ function useClearBand(navRef: RefObject<HTMLDivElement | null>) {
     return () => {
       ro.disconnect();
       removeEventListener("resize", fit);
-      band.style.removeProperty("padding-left");
+      band.style.removeProperty("margin-left");
     };
   }, [navRef]);
 }

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { stopCommand } from "./stop-command.js";
 import { realpathSync } from "node:fs";
 import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { NO_WRITE, objectShape, readJson, updateJson } from "../safe-file.js";
 import { GO_AHEAD_WORDS, guardTool, type GoAhead, type GuardPlace, type Verdict } from "../guardrails.js";
 import { errorHead } from "../error-head.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -11,7 +12,7 @@ import { createInterface } from "node:readline";
 import WebSocket from "ws";
 import { clock, closingSaid, keepAlive } from "../heartbeat.js";
 import { CLI_ID, ENGINE_NAMES, isEngineEffort, type Attachment, type EngineMode, type EngineTool, type ToolCommand, type DiffFile } from "../types.js";
-import { ADAPTERS, DECIDE_YOURSELF, PLAN_REFUSES, askedItem, childEnv, claudeMcpServers, claudePictures, imageType, codexExec, findBin, launcher, loginStatusCached, loginStatusQuick, tooLongForArgv, toolEnv, withDirs, type Adapter, type AdapterOut, type Launch, type TurnSpec } from "./adapters.js";
+import { ADAPTERS, DECIDE_YOURSELF, PLAN_REFUSES, askedItem, childEnv, claudeMcpServers, claudePictures, imageType, codexExec, findBin, launcher, loginStatusCached, loginStatusQuick, tooLongForArgv, withDirs, type Adapter, type AdapterOut, type Launch, type TurnSpec } from "./adapters.js";
 import { folderVars } from "./environment.js";
 import { applyCopy, baseAfterCommit, checkpoint, diffSince, diffTrees, dropShadow, reposInside, fetchBranch, repoInfo, sameTree, sessionBase, setSessionBase, shadowSnapshot, switchBranch, trackBranch, warmSnapshot, type RepoInfo, type Shadow } from "./git.js";
 import { hasCliTranscript, readCliTranscript } from "./imports.js";
@@ -38,7 +39,7 @@ import { AUTO_MODE, autoModeRefused } from "./adapters.js";
 import { acpEntry, ensureCursorEntry, openFridayMcp, type FridayMcp, type MeshAnswer } from "./friday-mcp.js";
 import { canScreenshot, screenshot } from "./screenshot.js";
 import { keepPictures } from "./tool-pictures.js";
-import { firstWordMs, hungMs, isHung, neverStarted, quietMs, treeCpu } from "./hung.js";
+import { firstWordMs, hungMs, isHung, neverStarted, quietMs, Silence, sleepWatch, treeCpu } from "./hung.js";
 import { localEdition } from "../local-edition.js";
 
 /**
@@ -195,14 +196,15 @@ export class RunnerError extends Error {
 
 /** Where each CLI's conversation id is remembered between runs. */
 const stateFile = () => process.env.FRIDAY_RUNNER_STATE ?? path.join(homedir(), ".friday", "runner-sessions.json");
-/** Everything in it, or nothing when there is no file yet or it can't be read. */
-async function remembered(): Promise<Record<string, string>> {
-  try {
-    const all = JSON.parse(await readFile(stateFile(), "utf8")) as Record<string, string> | null;
-    return all && typeof all === "object" ? all : {};
-  } catch {
-    return {};
-  }
+const rememberedShape = (v: unknown) => objectShape<Record<string, string>>(v);
+/**
+ * Everything in it, or nothing when there is no file yet or it can't be read. Only for reading: a change goes through
+ * `updateJson` (saveResume), which sets an unreadable file aside rather than writing an empty one over it, and reads the file
+ * afresh under its lock, so lanes saving at once, or the desktop app's runner and the open-source app's beside it on the same
+ * ~/.friday, keep each other's entries.
+ */
+function remembered(): Promise<Record<string, string>> {
+  return readJson(stateFile(), rememberedShape, () => ({}));
 }
 
 /**
@@ -1325,7 +1327,7 @@ export class Runner {
     const mesh = this.friday ? { FRIDAY_MESH_URL: this.friday.url } : {};
     // The account it runs as goes over everything else: a CLAUDE_CONFIG_DIR in the folder's variables would sign it in as another.
     const env = { ...childEnv(), ...folderVars(this.opts.cwd), ...this.launch.env, ...mesh, ...extra, ...accountEnv(this.opts.tool, this.account?.id) };
-    return { cwd: this.opts.cwd, env: this.opts.tool ? toolEnv(this.opts.tool, env) : env };
+    return { cwd: this.opts.cwd, env };
   }
 
   private dirtyRefusal(branch: string): RunnerError {
@@ -1829,9 +1831,11 @@ ${prompt}`;
     };
     // Silence is not a fault — a build or a test suite says nothing until it is over — so a long one is only said, where
     // the room can see it and decide. Silence with nothing running is (hung.ts): the tool is ended and the turn goes again.
-    let heard = Date.now();
-    /** When the turn was handed over: with nothing of the work since, how long it has been silent (see neverStarted). */
-    const began = heard;
+    // Measured while the computer is awake (hung.ts Silence): back from a sleep, a quiet tool isn't ended for the night it slept.
+    const releaseWatch = sleepWatch.hold();
+    const heard = new Silence();
+    /** Since the turn was handed over: with nothing of the work since, how long it has been silent (see neverStarted). */
+    const began = new Silence();
     /** Its process tree's CPU seconds at the last quiet note, while it has said nothing since. */
     let cpuMark: number | null = null;
     let hung = false;
@@ -1855,7 +1859,7 @@ ${prompt}`;
           if (spoke || done || this.live.size > 0 || this.meshWaits.size > 0) return;
           const cpu = await treeCpu(child.pid);
           if (spoke || child.exitCode !== null || child.signalCode !== null) return;
-          if (neverStarted(Date.now() - began, startCpu, cpu)) end(`${this.label} said nothing and ran nothing for ${minutes(firstWordMs())} after it was handed the turn; ending it so the turn can go again`, firstWordMs());
+          if (neverStarted(began.quiet(), startCpu, cpu)) end(`${this.label} said nothing and ran nothing for ${minutes(firstWordMs())} after it was handed the turn; ending it so the turn can go again`, firstWordMs());
         })(),
       firstWordMs(),
     );
@@ -1869,7 +1873,8 @@ ${prompt}`;
             const cpu = waiting || done ? null : await treeCpu(child.pid);
             if (child.exitCode !== null || child.signalCode !== null) return;
             if (hung) return;
-            if (!waiting && !done && isHung(Date.now() - heard, cpuMark, cpu)) {
+            // A sleep since the last look started the silence over (quiet() is 0): the CPU taken across it says nothing.
+            if (!waiting && !done && isHung(heard.quiet(), cpuMark, cpu)) {
               end(`${this.label} said nothing and ran nothing for ${minutes(hungMs())}; ending it so the turn can go again`, hungMs());
               return;
             }
@@ -1884,7 +1889,7 @@ ${prompt}`;
     child.stderr!.on("data", (d: Buffer) => (stderr = (stderr + d.toString()).slice(-4000)));
     const lines = createInterface({ input: child.stdout! });
     lines.on("line", (line) => {
-      heard = Date.now();
+      heard.heard();
       const outs = parse(line);
       // Only the tool getting on with the turn counts as it having spoken: a word, a thought, a step, or a notice of its turn.
       // A reply to the request that handed it the turn, or which conversation it is in, isn't: Codex answered a turn that way
@@ -1910,6 +1915,7 @@ ${prompt}`;
         held = setTimeout(() => resolve({ code: child.exitCode, signal: child.signalCode }), 2000);
       });
     });
+    releaseWatch();
     clearTimeout(grace);
     clearTimeout(quiet);
     clearTimeout(firstWord);
@@ -2536,25 +2542,27 @@ ${prompt}`;
   }
 
   private async saveResume(): Promise<void> {
+    const key = this.resumeKey;
+    const picked = this.picked;
+    const resumeId = this.resumeId;
+    const lost = this.lost;
     try {
-      const all = await remembered();
-      const key = this.resumeKey;
-      const picked = this.picked;
-      if (picked) {
-        // Which pick this lane's entry is for, and whether it was lost, so attaching for it again carries on from here (see
-        // `loadResume`). With no conversation yet it is kept, empty, rather than dropped, which would bring the pick back.
-        all[key] = this.resumeId ?? "";
-        all[`${key}|from`] = picked;
-        if (this.lost) all[`${key}|lost`] = "1";
-        else delete all[`${key}|lost`];
-      } else if (this.resumeId) all[key] = this.resumeId;
-      // One that turned out not to exist any more is forgotten, or every reconnect would try it again.
-      else if (key in all) delete all[key];
-      else return;
-      await mkdir(path.dirname(stateFile()), { recursive: true });
-      await writeFile(stateFile(), JSON.stringify(all, null, 2));
-    } catch {
-      // Not being able to remember only costs continuity, never correctness.
+      await updateJson(stateFile(), { shape: rememberedShape, empty: (): Record<string, string> => ({}) }, (all) => {
+        if (picked) {
+          // Which pick this lane's entry is for, and whether it was lost, so attaching for it again carries on from here (see
+          // `loadResume`). With no conversation yet it is kept, empty, rather than dropped, which would bring the pick back.
+          all[key] = resumeId ?? "";
+          all[`${key}|from`] = picked;
+          if (lost) all[`${key}|lost`] = "1";
+          else delete all[`${key}|lost`];
+        } else if (resumeId) all[key] = resumeId;
+        // One that turned out not to exist any more is forgotten, or every reconnect would try it again.
+        else if (key in all) delete all[key];
+        else return NO_WRITE;
+      });
+    } catch (e) {
+      // Not being able to remember only costs continuity, never correctness; said, so a disk that refuses it is seen.
+      this.log(`couldn't remember ${this.label}'s conversation: ${(e as Error).message}`);
     }
   }
 }

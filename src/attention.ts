@@ -5,6 +5,7 @@ import { carriedOn, planLimitHit } from "./limit-reset.js";
 import { laneName } from "./session/core.js";
 import { driverOf, taskAllowApplies, questionsTo, requestsTo, roleOf, runOf, type SessionState } from "./session/projection.js";
 import { MAIN_LANE, type EngineTool } from "./types.js";
+import { livePhase, type LivePhase, type Streaming } from "./step-words.js";
 
 /**
  * What is waiting on one person, across the sessions they are in.
@@ -208,7 +209,7 @@ export interface Crew {
    * plan short ("short"). While it works, `doing` is its latest step and `heardAt` when it last said anything; stopped on an error,
    * `why` is the error's first line and `plain` what it means; out of usage, `until` when it lifts.
    */
-  agents: { lane: string; name: string; tool?: EngineTool; /** Friday's own agent's face (agent-face.ts), the same one its tab and its replies wear. */ face?: number; state: CrewState; word: string; /** Held up on the person asking: only then is it amber. */ you?: true; plan?: string; /** Its plan, done of all, whatever state it is in (the phone's Live Activity bar). */ steps?: { done: number; of: number }; /** Its last words, once it isn't working. */ said?: string; doing?: { name: string; target?: string }; heardAt?: number; why?: string; plain?: string; until?: number | null }[];
+  agents: { lane: string; name: string; tool?: EngineTool; /** Friday's own agent's face (agent-face.ts), the same one its tab and its replies wear. */ face?: number; state: CrewState; word: string; /** Held up on the person asking: only then is it amber. */ you?: true; plan?: string; /** Its plan, done of all, whatever state it is in (the phone's Live Activity bar). */ steps?: { done: number; of: number }; /** Its last words, once it isn't working. */ said?: string; doing?: { name: string; target?: string }; /** Working with no step under way: where it is between steps (step-words.ts liveWords). */ phase?: LivePhase; heardAt?: number; why?: string; plain?: string; until?: number | null }[];
   /** A crew mate has its work now (crew.handed): "Kit is on it", and the lanes it works on it in here, for one handed before it went to the crew mate's own thread (crew-carry.ts). */
   handed?: string;
   handedLanes?: string[];
@@ -224,7 +225,7 @@ const CREW_OF: Record<AgentPhase, CrewState> = { needs: "needs", waiting: "waiti
  * computer is: after a restart every finished session's tool read "Offline" until it was sent something, though the computer was
  * right here (2026-11-04 end-to-end check).
  */
-export function crewOf(state: SessionState, hostUp?: (hostId: string) => boolean, meId = ""): Crew | null {
+export function crewOf(state: SessionState, hostUp?: (hostId: string) => boolean, meId = "", /** What a lane's agent is streaming now (bus.ts streamingNow): streamed words are never logged. */ streaming?: (lane: string) => Streaming): Crew | null {
   const lanes = [MAIN_LANE, ...state.lanes.filter((l) => l.control.kind !== "standing").map((l) => l.id)];
   // The main lane counts once something is in it: a coding tool attached, or a run that has gone; a session of coding tools
   // alone has an empty main lane that is no one.
@@ -234,10 +235,15 @@ export function crewOf(state: SessionState, hostUp?: (hostId: string) => boolean
     const now = agentState(state, lane, meId, hostUp ? { hostUp } : {});
     const st = CREW_OF[now.phase];
     const plan = state.planDone?.[lane];
-    const doing = st === "working" ? state.doing?.[lane] : undefined;
+    // Its step only while it is under way (its result not back yet): back, it is deciding what next, or writing its answer.
+    const out = state.inFlight?.[lane];
+    // Its words streaming beat a step that still looks under way, as the reply's line has it (run-line.tsx).
+    const live = st === "working" ? (streaming?.(lane) ?? null) : null;
+    const doing = st === "working" && live !== "text" && (!out || out.length) ? state.doing?.[lane] : undefined;
+    const phase: LivePhase | undefined = st !== "working" || doing ? undefined : livePhase(!!out, live);
     const heard = st === "working" ? heardOf(state, lane) : undefined;
     const why = now.error?.raw.trim().split(/\r?\n/)[0]?.slice(0, 160);
-    return { lane, name: laneName(state, lane), ...(engine?.tool ? { tool: engine.tool } : { face: faceIndex(state, lane) }), state: st, word: now.word, ...(now.needsYou ? { you: true as const } : {}), ...(st === "short" && plan ? { plan: `${plan.done} of ${plan.of}` } : {}), ...(plan && plan.of > 0 ? { steps: { done: plan.done, of: plan.of } } : {}), ...(st !== "working" && state.said?.[lane] ? { said: state.said[lane]!.slice(0, 200) } : {}), ...(doing ? { doing } : {}), ...(heard ? { heardAt: heard } : {}), ...(now.error ? { plain: now.error.plain, ...(why ? { why } : {}) } : {}), ...(now.until !== undefined ? { until: now.until } : {}) };
+    return { lane, name: laneName(state, lane), ...(engine?.tool ? { tool: engine.tool } : { face: faceIndex(state, lane) }), state: st, word: now.word, ...(now.needsYou ? { you: true as const } : {}), ...(st === "short" && plan ? { plan: `${plan.done} of ${plan.of}` } : {}), ...(plan && plan.of > 0 ? { steps: { done: plan.done, of: plan.of } } : {}), ...(st !== "working" && state.said?.[lane] ? { said: state.said[lane]!.slice(0, 200) } : {}), ...(doing ? { doing } : {}), ...(phase ? { phase } : {}), ...(heard ? { heardAt: heard } : {}), ...(now.error ? { plain: now.error.plain, ...(why ? { why } : {}) } : {}), ...(now.until !== undefined ? { until: now.until } : {}) };
   });
   // A lane handed on to a crew mate: the row's own line says who has it, no badge of its own (Code and Crew, connected, 2026-11-13:
   // "The sidebar row says 'Kit is on it'").

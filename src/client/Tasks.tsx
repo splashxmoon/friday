@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { doingNow } from "../activity-line.js";
+import { tickEvery } from "./presence.js";
 import { MAIN_LANE, type AgentTaskStatus, type Member, type SessionEvent } from "../types.js";
 import { driverOf, runOf, uniqueLaneName, type SessionState } from "../session/projection.js";
 import type { PreviewInfo } from "../runner/preview.js";
@@ -11,6 +12,7 @@ import { commandsIn } from "./Terminal.js";
 import { relTime } from "./ui.js";
 import type { Send } from "./useSession.js";
 import { agentState, type AgentPhase } from "../agent-state.js";
+import { logMemo } from "./log-memo.js";
 
 /**
  * What is running here, and what has finished.
@@ -73,7 +75,14 @@ export interface SubTask {
   heard: number;
 }
 
-export function subTasksIn(events: SessionEvent[]): SubTask[] {
+/**
+ * Asked by every run's block on every event: read again only when a subagent's report or a stop is added, or it's another log
+ * (log-memo.ts; spec 13, a long session read its whole log for each block on every event).
+ */
+export const subTasksIn = (events: SessionEvent[]): SubTask[] => logMemo(subTasksKept, events, (l) => subTasksOf(l as SessionEvent[]), (e) => e.body.type === "agent.task" || e.body.type === "run.pause" || e.body.type === "run.cancel");
+const subTasksKept: Parameters<typeof logMemo<SubTask[]>>[0] = { current: null };
+
+function subTasksOf(events: SessionEvent[]): SubTask[] {
   const all = new Map<string, SubTask>();
   for (const e of events) {
     // Stopping a turn stops what it sent off, unless it was sent to work on in the background: a subagent no tool reports on again
@@ -259,8 +268,8 @@ export function TasksPanel({
   useEffect(() => {
     if (!anyRunning) return;
     setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    // The page's one 1-second ticker, shared with every other clock and still while the window is hidden (presence.tsx).
+    return tickEvery(1000, setNow);
   }, [anyRunning]);
   const mayStop = (lane: string) => !!me && !!send && (me.role === "owner" || driverOf(state, lane)?.id === me.id);
   // A command is stopped on the computer it runs on: this one's, by whoever may stop its agent.

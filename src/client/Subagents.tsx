@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { tickEvery } from "./presence.js";
 import { ChevronDownIcon } from "lucide-react";
 import { Icon } from "./icons.js";
 import type { EngineTool } from "../types.js";
@@ -95,8 +96,8 @@ function useNow(on: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!on) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    // The page's one 1-second ticker, shared with every other clock and still while the window is hidden (presence.tsx).
+    return tickEvery(1000, setNow);
   }, [on]);
   return now;
 }
@@ -217,7 +218,7 @@ export function Subagents({ rows }: { rows: SubagentRow[] }) {
 }
 
 /** Scrolls the conversation to the reply that sent a subagent off, and lets it flash, as the Jump menu does. */
-function jumpTo(seq: number) {
+export function jumpTo(seq: number) {
   revealSeq(seq);
   let best: HTMLElement | null = null;
   let bestSeq = 0;

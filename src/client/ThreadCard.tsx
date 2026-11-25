@@ -8,7 +8,7 @@ import { tabState } from "./agent-tab.js";
 import { Icon } from "./icons.js";
 import { EngineMark } from "./BrandMarks.js";
 import { ContextMenu, type MenuItem } from "./ui.js";
-import { TabRing, useNow, type Presence } from "./presence.js";
+import { useNow } from "./presence.js";
 import { BranchButton } from "./Branches.js";
 import { GitMenu } from "./github-menu.js";
 import { changeTotals } from "./change-totals.js";
@@ -32,6 +32,10 @@ import { api } from "./api.js";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { fileUrl } from "./api.js";
 import { runProof, type Proof } from "../team-proof.js";
+import { checkStateOf, checkWords, type CheckState } from "../check-state.js";
+import { TEST_CMD } from "../receipt.js";
+import { subTasksIn, type SubTask } from "./Tasks.js";
+import { jumpTo } from "./Subagents.js";
 import "./thread-card.css";
 
 /**
@@ -70,8 +74,6 @@ const toneOf = (a: HubAgent): Tone => {
   const t = tabState(a.status, a.needsYou);
   return t === "working" ? "work" : t === "needs" ? "need" : t === "done" ? "done" : t === "failed" ? "bad" : t === "waiting" || t === "limited" ? "wait" : "idle";
 };
-/** Each tone as the session tab's ring draws it (presence.tsx TabRing). */
-const TONE_RING: Record<Tone, Presence | "done" | null> = { work: "working", need: "needs", done: "done", bad: "error", wait: "queued", idle: null };
 /** "1:40", "12:05", "1h 4m". */
 const clock = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -79,6 +81,19 @@ const clock = (ms: number) => {
 };
 const clipText = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
 const firstLine = (t: string) => (t.split("\n").find((l) => l.trim()) ?? "").trim();
+/** How long an agent's run has taken: at work, so far; done, start to end. */
+const spentOf = (a: HubAgent, now: number): number | null => (toneOf(a) === "work" && a.startedAt ? now - a.startedAt : toneOf(a) === "done" && a.startedAt && a.endedAt ? a.endedAt - a.startedAt : null);
+/** Where an agent stands in a word, at the right of its row. */
+const TONE_WORD: Record<Tone, string> = { work: "Working", need: "Needs you", done: "Done", bad: "Stopped", wait: "Waiting", idle: "Free" };
+/** Done, in the proof's word: a check's own ("Checked", "Check failed", "Checking…"), a check failing, unverified, or done. */
+const doneWord = (said: { text: string; tone?: "bad" | "warn" | "wait"; checked?: true } | null): { text: string; tone: Tone } => {
+  const tone: Tone = said?.tone === "bad" ? "bad" : said?.tone === "warn" ? "need" : said?.tone === "wait" ? "idle" : "done";
+  if (said?.checked) return { text: said.text.split(" · ")[0]!, tone };
+  return { text: said?.tone === "bad" ? "Failing" : said?.tone === "warn" ? "Unverified" : "Done", tone };
+};
+/** A subagent's line: its kind when the tool names one, and what it is doing, else what it was sent to do. */
+const subWords = (t: SubTask) => `${t.agentType && t.agentType !== "general-purpose" ? t.agentType : "Subagent"} · ${t.doing ?? t.description}`;
+const SUBS_SHOWN = 3;
 
 /** The menu of an agent (Rename, Make it lead, Side by side, Remove, what the chat shows), the chat's own (Activity.tsx kindMenu). */
 const agentMenu = (x: number, y: number, lane?: string) => dispatchEvent(new CustomEvent("friday:agent-menu", { detail: { x, y, ...(lane ? { lane } : {}) } }));
@@ -321,12 +336,35 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
   const modelRows = useModelLaneRows(state, me, identity, invite);
   const working = agents.filter((a) => toneOf(a) === "work").length;
   const needs = agents.filter((a) => a.needsYou).length;
-  const now = useNow(working ? 1000 : 30_000);
+  // Each agent's subagents at work, nested under it (Tasks.tsx subTasksIn: the tray's own list).
+  const subsOf = new Map<string, SubTask[]>();
+  for (const t of subTasksIn(events)) if (t.opened && t.agentType !== "command" && t.status === "running") subsOf.set(t.lane, [...(subsOf.get(t.lane) ?? []), t]);
+  const now = useNow(working || subsOf.size ? 1000 : 30_000);
+  const spent = agents.map((a) => spentOf(a, now) ?? 0);
+  const longest = Math.max(0, ...spent);
+  const total = spent.reduce((x, y) => x + y, 0);
   const fold = () => (write(FOLD_KEY, !folded), setFolded(!folded));
   const may = me.role === "owner" || me.role === "editor";
+  /**
+   * The agents Stop all asked to stop and not stopped yet: it reads "Stopping…" the moment it is pressed, as the box's Stop does
+   * (spec 13), until their runs end; one refused is working again, and the session says why.
+   */
+  const [stopping, setStopping] = useState<ReadonlySet<string>>(() => new Set());
+  const atWork = agents.filter((a) => toneOf(a) === "work").map((a) => a.lane);
+  const atWorkKey = atWork.join(" ");
+  useEffect(() => {
+    if (!stopping.size) return;
+    const left = [...stopping].filter((l) => atWork.includes(l));
+    if (left.length !== stopping.size) setStopping(new Set(left));
+  }, [atWorkKey, stopping]); // eslint-disable-line react-hooks/exhaustive-deps
+  const allStopping = atWork.length > 0 && atWork.every((l) => stopping.has(l));
   const stopAll = () => {
-    const lanes = agents.filter((a) => toneOf(a) === "work").map((a) => a.lane);
-    void Promise.all(lanes.map((lane) => send({ type: "run.pause", ...(lane !== MAIN_LANE ? { lane } : {}) })));
+    const lanes = atWork.filter((l) => !stopping.has(l));
+    setStopping((was) => new Set([...was, ...lanes]));
+    for (const lane of lanes)
+      void send({ type: "run.pause", ...(lane !== MAIN_LANE ? { lane } : {}) }).then((r) => {
+        if (!r.ok) setStopping((was) => new Set([...was].filter((x) => x !== lane)));
+      });
   };
   const answer = (lane: string) => {
     focusAgent(sid, lane);
@@ -342,7 +380,7 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
   const words: Record<Tone, string> = { work: "working", need: "needs you", done: "done", bad: "stopped", wait: "waiting", idle: "free" };
   const status = agents.map((a) => `${agentNameFor(state, a.lane)} ${words[toneOf(a)]}`).join(", ");
   return (
-    <div className="tc-sec tc-agents">
+    <div className={cn("tc-sec tc-agents", folded && "is-folded")}>
       <div className="tc-head">
         <button type="button" className="tc-head-btn" onClick={fold} aria-expanded={!folded} title={folded ? `Show the agents${status ? `: ${status}` : ""}` : "Fold the agents"}>
           <span className="tc-ic">
@@ -350,6 +388,7 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
           </span>
           <b>Agents</b>
           {!sum.length && !(folded && agents.length) && <span className="tc-dim">{agents.length + starting.length}</span>}
+          {!sum.length && !folded && total >= 1000 && <span className="tc-dim tc-head-sum">· {clock(total)} of work</span>}
           {sum.length > 0 && !folded && (
             <span className="tc-head-sum">
               {working > 0 && <span>· {working} working</span>}
@@ -381,104 +420,95 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
           <ul className="tc-list">
             {agents.map((a) => {
               const tone = toneOf(a);
+              const name = agentNameFor(state, a.lane);
               const look = agentLook(state, a.lane, 13);
               const line = firstLine(a.line);
               // Done: what proves it (Arun, 2026-11-16, "Do 3": proof before done), else its last words.
-              const proof = tone === "done" ? lastProof(events, a.lane, agentNameFor(state, a.lane), state.id) : null;
-              const said = proof ? proofLine(proof) : null;
-              const sub = tone === "done" ? (said ? `Done · ${said.text}` : line ? `Done · ${line.replace(/^done[:.\s—-]*/i, "")}` : "Done") : line || a.now.word;
-              const time = tone === "work" && a.startedAt ? clock(now - a.startedAt) : tone === "done" && a.startedAt && a.endedAt ? clock(a.endedAt - a.startedAt) : "";
+              const proof = tone === "done" ? lastProof(events, a.lane, name, state.id) : null;
+              // Said as the reply's badge says it, a check after it included (check-state.ts): never "no tests run" over "Checked".
+              const said = proof ? proofLine(proof, proof.check) : null;
+              const sub = tone === "done" ? (said ? (said.checked ? said.text : `Done · ${said.text}`) : line ? `Done · ${line.replace(/^done[:.\s—-]*/i, "")}` : "Done") : line || a.now.word;
+              const ms = spentOf(a, now);
+              const time = ms == null ? "" : clock(ms);
+              // How long it worked beside the others: the longest one's bar runs the row (Arun, 2026-11-24: "i kinda just want this").
+              const fill = ms && longest ? Math.max(4, Math.round((ms / longest) * 100)) : 0;
+              const w = tone === "done" ? doneWord(said) : { text: TONE_WORD[tone], tone };
               const on = focused === a.lane;
+              const subs = subsOf.get(a.lane) ?? [];
+              const row = (
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className={cn("tc-agent", on && "on", `is-${tone}`)}
+                  onClick={() => focusAgent(sid, on ? "all" : a.lane)}
+                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), focusAgent(sid, on ? "all" : a.lane))}
+                  onContextMenu={may ? (e) => (e.preventDefault(), agentMenu(e.clientX, e.clientY, a.lane)) : undefined}
+                  {...dragAgent(a.lane)}
+                  title={`${sub}\n${on ? "Back to every agent's work" : `Only ${name}'s work · drag onto the chat to see it side by side`}`}
+                  aria-label={`${name}${state.lead === a.lane ? ", leads the others" : ""}: ${sub}${time ? `, ${time}` : ""}`}
+                  aria-pressed={on}
+                >
+                  <span className="tc-mark" style={{ "--tint": look.tint } as React.CSSProperties}>
+                    {look.mark}
+                  </span>
+                  <span className="tc-agent-main">
+                    <span className="tc-agent-name">
+                      <span className="tc-trunc">{name}</span>
+                      {state.lead === a.lane && <span className="tc-lead" role="img" aria-label="Leads the other agents" title="Leads the other agents"><Icon name="crown" size={13} /></span>}
+                      {tone === "need" ? (
+                        <button type="button" className="tc-answer" onClick={(e) => (e.stopPropagation(), answer(a.lane))}>
+                          Answer
+                        </button>
+                      ) : proof && said ? (
+                        <PopoverTrigger asChild>
+                          <button type="button" className={cn("tc-word tc-proof", `is-${w.tone}`)} onClick={(e) => e.stopPropagation()} aria-label={`Proof: ${said.text}`} title={`${said.text} · what proves it: the checks, the changes, the picture, its own review`}>
+                            {w.text}
+                          </button>
+                        </PopoverTrigger>
+                      ) : (
+                        <span className={cn("tc-word", `is-${w.tone}`)}>{w.text}</span>
+                      )}
+                    </span>
+                    <span className={cn("tc-bar", `is-${tone}`)} aria-hidden="true">
+                      <i style={{ width: `${fill}%` }} />
+                    </span>
+                  </span>
+                  <span className="tc-agent-end">
+                    <span className="tc-time">{time}</span>
+                    {may && <AgentMore lane={a.lane} name={name} />}
+                  </span>
+                </div>
+              );
               return (
                 <li key={a.lane}>
                   {proof && said ? (
                     // Its proof opens beside the card, level with the agent's row, never over the card itself.
                     <Popover>
-                      <PopoverAnchor asChild>
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    className={cn("tc-agent", on && "on", `is-${tone}`)}
-                    onClick={() => focusAgent(sid, on ? "all" : a.lane)}
-                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), focusAgent(sid, on ? "all" : a.lane))}
-                    onContextMenu={may ? (e) => (e.preventDefault(), agentMenu(e.clientX, e.clientY, a.lane)) : undefined}
-                    {...dragAgent(a.lane)}
-                    title={on ? "Back to every agent's work" : `Only ${agentNameFor(state, a.lane)}'s work · drag onto the chat to see it side by side`}
-                    aria-label={`${agentNameFor(state, a.lane)}${state.lead === a.lane ? ", leads the others" : ""}: ${sub}${time ? `, ${time}` : ""}`}
-                    aria-pressed={on}
-                  >
-                    <span className="tc-ring-slot"><TabRing state={TONE_RING[tone]} /></span>
-                    <span className="tc-mark" style={{ "--tint": look.tint } as React.CSSProperties}>
-                      {look.mark}
-                    </span>
-                    <span className="tc-agent-main">
-                      <span className="tc-agent-name">
-                        <span className="tc-trunc">{agentNameFor(state, a.lane)}</span>
-                        {state.lead === a.lane && <span className="tc-lead" role="img" aria-label="Leads the other agents" title="Leads the other agents"><Icon name="crown" size={13} /></span>}
-                        {time && <span className="tc-time">{time}</span>}
-                      </span>
-                      {proof && said ? (
-                        <PopoverTrigger asChild>
-                          <button type="button" className={cn("tc-agent-sub tc-proof", said.tone && `is-${said.tone}`)} onClick={(e) => e.stopPropagation()} aria-label={`Proof: ${said.text}`} title="What proves it: the checks, the changes, the picture, its own review">
-                            {sub}
-                          </button>
-                        </PopoverTrigger>
-                      ) : (
-                        <span className="tc-agent-sub" title={a.line}>
-                          {sub}
-                        </span>
-                      )}
-                    </span>
-                    <span className="tc-agent-end">
-                      {tone === "need" && (
-                        <button type="button" className="tc-answer" onClick={(e) => (e.stopPropagation(), answer(a.lane))}>
-                          Answer
-                        </button>
-                      )}
-                      {may && <AgentMore lane={a.lane} name={agentNameFor(state, a.lane)} />}
-                    </span>
-                  </div>
-                      </PopoverAnchor>
+                      <PopoverAnchor asChild>{row}</PopoverAnchor>
                       <PopoverContent side="left" align="start" sideOffset={20} collisionPadding={12} className="tc-proof-pop" onClick={(e) => e.stopPropagation()}>
-                        <ThreadProof proof={proof} name={agentNameFor(state, a.lane)} look={look} picture={proof.page?.file && proof.page.sid === sid ? fileUrl(sid, invite, proof.page.file) : null} onChanges={onChanges} onWork={() => focusAgent(sid, a.lane)} />
+                        <ThreadProof proof={proof} name={name} look={look} picture={proof.page?.file && proof.page.sid === sid ? fileUrl(sid, invite, proof.page.file) : null} onChanges={onChanges} onWork={() => focusAgent(sid, a.lane)} />
                       </PopoverContent>
                     </Popover>
                   ) : (
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    className={cn("tc-agent", on && "on", `is-${tone}`)}
-                    onClick={() => focusAgent(sid, on ? "all" : a.lane)}
-                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), focusAgent(sid, on ? "all" : a.lane))}
-                    onContextMenu={may ? (e) => (e.preventDefault(), agentMenu(e.clientX, e.clientY, a.lane)) : undefined}
-                    {...dragAgent(a.lane)}
-                    title={on ? "Back to every agent's work" : `Only ${agentNameFor(state, a.lane)}'s work · drag onto the chat to see it side by side`}
-                    aria-label={`${agentNameFor(state, a.lane)}${state.lead === a.lane ? ", leads the others" : ""}: ${sub}${time ? `, ${time}` : ""}`}
-                    aria-pressed={on}
-                  >
-                    <span className="tc-ring-slot"><TabRing state={TONE_RING[tone]} /></span>
-                    <span className="tc-mark" style={{ "--tint": look.tint } as React.CSSProperties}>
-                      {look.mark}
-                    </span>
-                    <span className="tc-agent-main">
-                      <span className="tc-agent-name">
-                        <span className="tc-trunc">{agentNameFor(state, a.lane)}</span>
-                        {state.lead === a.lane && <span className="tc-lead" role="img" aria-label="Leads the other agents" title="Leads the other agents"><Icon name="crown" size={13} /></span>}
-                        {time && <span className="tc-time">{time}</span>}
-                      </span>
-                      <span className="tc-agent-sub" title={a.line}>
-                        {sub}
-                      </span>
-                    </span>
-                    <span className="tc-agent-end">
-                      {tone === "need" && (
-                        <button type="button" className="tc-answer" onClick={(e) => (e.stopPropagation(), answer(a.lane))}>
-                          Answer
-                        </button>
-                      )}
-                      {may && <AgentMore lane={a.lane} name={agentNameFor(state, a.lane)} />}
-                    </span>
-                  </div>
+                    row
+                  )}
+                  {subs.length > 0 && (
+                    // Its subagents at work, under the agent that sent them (the status bar's tray says them when the agents fold).
+                    <ul className="tc-subs">
+                      {subs.slice(0, SUBS_SHOWN).map((t) => (
+                        <li key={t.key}>
+                          <button type="button" className="tc-sub" onClick={() => jumpTo(t.seq)} title={`${t.description}\nWhere ${name} sent it`}>
+                            <span className="tc-elbow" aria-hidden="true" />
+                            <span className="tc-sub-what">
+                              <span className="ring-spin" aria-hidden="true" />
+                              <span className="tc-trunc">{subWords(t)}</span>
+                            </span>
+                            <span className="tc-time">{clock(now - t.start)}</span>
+                          </button>
+                        </li>
+                      ))}
+                      {subs.length > SUBS_SHOWN && <li className="tc-sub-more">and {subs.length - SUBS_SHOWN} more</li>}
+                    </ul>
                   )}
                 </li>
               );
@@ -486,13 +516,17 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
             {starting.map((s) => (
               <li key={`starting-${s.tool}`}>
                 <div className="tc-agent is-work">
-                  <span className="tc-ring is-work" aria-hidden />
                   <span className="tc-mark">
                     <EngineMark tool={s.tool} size={13} />
                   </span>
                   <span className="tc-agent-main">
-                    <span className="tc-agent-name">{ENGINE_NAMES[s.tool]}</span>
-                    <span className="tc-agent-sub">Starting…</span>
+                    <span className="tc-agent-name">
+                      <span className="tc-trunc">{ENGINE_NAMES[s.tool]}</span>
+                      <span className="tc-word is-work">Starting…</span>
+                    </span>
+                    <span className="tc-bar is-work" aria-hidden="true">
+                      <i style={{ width: 0 }} />
+                    </span>
                   </span>
                   <span />
                 </div>
@@ -510,9 +544,9 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
                 Add agent
               </button>
               {working > 0 && (
-                <button type="button" className="tc-foot-btn" onClick={stopAll} title="Stop every agent at work: each stays here for the next task">
+                <button type="button" className="tc-foot-btn" onClick={stopAll} disabled={allStopping} aria-busy={allStopping || undefined} title={allStopping ? "Waiting for them to stop" : "Stop every agent at work: each stays here for the next task"}>
                   <Icon name="stop" size={12} />
-                  Stop all
+                  {allStopping ? "Stopping…" : "Stop all"}
                 </button>
               )}
             </div>
@@ -548,8 +582,8 @@ function lastProof(events: readonly SessionEvent[], lane: string, name: string, 
   proofs.set(key, { at, proof });
   return proof;
 }
-/** A run's proof with the run itself: how long it took, when it finished, and its closing words. */
-type RunProof = Proof & { run: { ms: number; at: number; said: string } };
+/** A run's proof with the run itself: how long it took, when it finished, its closing words, and where a check of it stands. */
+type RunProof = Proof & { run: { ms: number; at: number; said: string }; check: CheckState };
 function findProof(events: readonly SessionEvent[], lane: string, name: string, sid: string): RunProof | null {
   let end: SessionEvent | null = null;
   let said = "";
@@ -561,17 +595,30 @@ function findProof(events: readonly SessionEvent[], lane: string, name: string, 
       continue;
     }
     if (!said && e.body.type === "agent.message" && e.body.text.trim()) said = e.body.text;
-    if (e.body.type === "run.started") return { ...runProof(events, { lane, startSeq: e.seq, endSeq: end.seq }, name, name, sid), run: { ms: end.ts - e.ts, at: end.ts, said } };
+    if (e.body.type === "run.started") return { ...runProof(events, { lane, startSeq: e.seq, endSeq: end.seq }, name, name, sid), run: { ms: end.ts - e.ts, at: end.ts, said }, check: checkStateOf(events, lane, end.seq) };
   }
   return null;
 }
 
-/** What the proof shows in a few words: tests pass or failing (or none run), how many files, and a picture when there is one. */
-export function proofLine(p: Proof): { text: string; tone?: "bad" | "warn" } {
+/**
+ * What the proof shows in a few words, in the reply's own words for it: a check asked for after the run first ("Checked · 3 tests pass",
+ * "Check failed", "Checking…", check-state.ts), else its own tests ("tests passed", "a check failing") or "unverified" when it changed
+ * files and ran none; then how many files, and a picture when there is one. Null when it changed nothing and ran nothing: its words say it.
+ * `checked`: the words stand on their own, without "Done ·" before them.
+ */
+export function proofLine(p: Proof, check?: CheckState): { text: string; tone?: "bad" | "warn" | "wait"; checked?: true } | null {
   const ran = p.checks.filter((c) => !c.skipped);
   const failed = ran.filter((c) => !c.ok);
   const files = p.changed.files.length + p.changed.more;
-  const parts = [failed.length ? `${failed.length === 1 ? "a check" : `${failed.length} checks`} failing` : ran.length ? "tests pass" : "no tests run", files ? `${files} file${files === 1 ? "" : "s"}` : "", p.page?.file ? "screenshot" : ""].filter(Boolean);
+  const tail = [files ? `${files} file${files === 1 ? "" : "s"}` : "", p.page?.file ? "screenshot" : ""];
+  const asked = check ? checkWords(check) : null;
+  // Checking is under way (grey, as the badge's ring is), a check that couldn't run or a clip in its place is amber, as "unverified" is.
+  const tone = asked?.tone === "fail" ? "bad" : check?.phase === "checking" ? "wait" : asked?.tone === "none" ? "warn" : null;
+  if (asked) return { text: [asked.text, ...tail].filter(Boolean).join(" · "), checked: true, ...(tone ? { tone } : {}) };
+  if (!ran.length && !files && !p.page?.file) return null;
+  // "tests passed" only when a test ran: a build or a linter passing is a check.
+  const tested = ran.some((c) => TEST_CMD.test(c.command));
+  const parts = [failed.length ? `${failed.length === 1 ? "a check" : `${failed.length} checks`} failing` : ran.length ? (tested ? "tests passed" : "checks passed") : files ? "unverified" : "", ...tail].filter(Boolean);
   return { text: parts.join(" · "), ...(failed.length ? { tone: "bad" as const } : !ran.length && files ? { tone: "warn" as const } : {}) };
 }
 
@@ -603,10 +650,12 @@ function OpenedList({ events }: { events: readonly SessionEvent[] }) {
  * page's picture; and the two places to go from it.
  */
 function ThreadProof({ proof, name, look, picture, onChanges, onWork }: { proof: RunProof; name: string; look: { mark: React.ReactNode; tint: string }; picture: string | null; onChanges: () => void; onWork: () => void }) {
-  const verdict = proofLine(proof);
+  const verdict = proofLine(proof, proof.check) ?? { text: "" };
   const ran = proof.checks.filter((c) => !c.skipped);
   const passed = ran.filter((c) => c.ok).length;
-  const word = verdict.tone === "bad" ? "Failing" : ran.length ? "Tests pass" : "No tests run";
+  // A check asked for after the run speaks first, in the badge's words: "Checked", "Check failed", "Checking…".
+  const asked = checkWords(proof.check);
+  const word = asked ? (proof.check.phase === "passed" ? "Checked" : proof.check.phase === "failed" ? "Check failed" : asked.text.replace(/^Done · /, "").replace(/^./, (c) => c.toUpperCase())) : verdict.tone === "bad" ? "Failing" : ran.length ? "Tests pass" : "No tests run";
   const files = proof.changed.files;
   const count = files.length + proof.changed.more;
   const more = proof.changed.more + Math.max(0, files.length - 8);

@@ -10,6 +10,8 @@ import { hostApi } from "./local.js";
 import type { Identity } from "./storage.js";
 import { MenuButton } from "./ui.js";
 import { WorkspaceCard, type Picked } from "./Workspace.js";
+/** A file input that picks a folder, as every browser understands it (not in every version of the DOM types). */
+const FOLDER_PICK = { webkitdirectory: "", directory: "" } as Record<string, string>;
 
 /**
  * Attaching files to the first message.
@@ -305,7 +307,7 @@ export function AttachButton({
   onChange: (f: Attached[]) => void;
   onNote: (msg: string) => void;
   /** Absent when there is no machine to look on. */
-  workspace?: { identity: Identity; tool: EngineTool; resume?: CliSession; onPick: (p: Picked | null) => void; onTool?: (t: EngineTool) => void; onNeedsMachine?: () => void; /** Folders, not repositories (WorkspaceCard plain). */ plain?: boolean };
+  workspace?: { identity: Identity; tool: EngineTool; resume?: CliSession; onPick: (p: Picked | null) => void; onTool?: (t: EngineTool) => void; onNeedsMachine?: () => void; /** Folders, not repositories (WorkspaceCard plain). */ plain?: boolean; /** A folder picked is still being looked at (WorkspaceCard onOpening). */ onOpening?: (opening: boolean) => void };
 }) {
   const filePicker = useRef<HTMLInputElement>(null);
   const folderPicker = useRef<HTMLInputElement>(null);
@@ -328,11 +330,14 @@ export function AttachButton({
     try {
       const p = await desktop!.pickFolder();
       if (!p) return;
+      workspace!.onOpening?.(true);
       const r = await hostApi<{ folder: FolderInfo }>(workspace!.identity, `/api/runner/describe?path=${encodeURIComponent(p)}`);
       workspace!.onPick({ folder: r.folder });
       onNote(`Working in ${r.folder.name} on this computer. Nothing is uploaded, so any size works.`);
     } catch (e) {
       onNote(`Couldn't open that folder: ${(e as Error).message}`);
+    } finally {
+      workspace!.onOpening?.(false);
     }
   };
   const openWorkspace = (which: "sessions" | "repos", at: HTMLElement | null = null) => () => (workspace?.onNeedsMachine ? workspace.onNeedsMachine() : (setFrom(at), setPicking(which)));
@@ -365,9 +370,9 @@ export function AttachButton({
         type="file"
         hidden
         multiple
-        // @ts-expect-error -- not in the DOM types, understood by every browser.
-        webkitdirectory=""
-        directory=""
+        // Pick a folder: webkitdirectory is in @types/react from 19.3.3 and directory in none, so both go as plain attributes, which
+        // type-check on any version (a fresh public install took 19.3.3, where the old @ts-expect-error had nothing to expect).
+        {...FOLDER_PICK}
         onChange={(e) => {
           take(e.target.files);
           e.target.value = "";
@@ -427,6 +432,7 @@ export function AttachButton({
           plain={!!workspace.plain}
           onPick={workspace.onPick}
           {...(workspace.onTool ? { onTool: workspace.onTool } : {})}
+          {...(workspace.onOpening ? { onOpening: workspace.onOpening } : {})}
           onClose={() => setPicking(null)}
         />
       )}

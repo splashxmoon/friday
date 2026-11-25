@@ -27,6 +27,9 @@ export function feedbackUrl({ version, os, app }: { version: string; os: string;
     "**Steps to reproduce**",
     "1. ",
     "",
+    // Nothing is attached for them: they choose to paste it, and see all of it first (diagnostics.ts, Settings › Updates).
+    "_Optional: in Friday on your computer, Settings › Updates › Copy diagnostics, then paste it here. It leaves out keys, tokens and file contents._",
+    "",
     "---",
     `Friday ${version || "(version unknown)"} · ${os} · ${app ? "desktop app" : "browser"}`,
   ].join("\n");

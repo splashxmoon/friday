@@ -133,6 +133,7 @@ import type { ProgressStatus, ProgressStep } from "@/components/agents/agent-pro
 import type { TodoStep } from "@/components/aicss/TodoList";
 import { TodoItems, TodoList, type TodoItem } from "@/components/agents/todo-list";
 import { PatchSource, useFullFiles } from "./patchSource.js";
+import { eventsAfter, keptFold, ofType, ofTypes, useLogFold, useLogMemo } from "./log-memo.js";
 import { originOf } from "../session/patches.js";
 import { quickConnect, startingOn, useStarting } from "./quickConnect.js";
 import { StartingLaneTab } from "./Lanes.js";
@@ -156,7 +157,7 @@ import { ApprovalCard } from "@/components/aicss/ApprovalCard";
 import { askProse, askReply, parseChoices, type Ask } from "./ask-choices.js";
 import { ASK_FOCUS } from "./Attention.js";
 import { rememberAsk, walkAsks } from "./askHistory.js";
-import { hiddenNotes } from "../session-notes.js";
+import { NOTE_TYPES, hiddenNotes } from "../session-notes.js";
 import type { AgentStatus } from "../agents-hub.js";
 import { ALL, agentKey, focusAgent, jumpToNeeds, markSeen, nextKey, openedAt, useAgents, useFocusedAgent, useSeen } from "./agentFocus.js";
 import { QueuedActions, runTeamCommand, TeamBanner } from "./TeamControls.js";
@@ -195,6 +196,8 @@ import { leftOff } from "../left-off.js";
 import { editPreview, failingTests, foldLine } from "../step-extras.js";
 import { stepKind } from "../run-strip.js";
 import { RunLine, doingKind, plainStep } from "./run-line.js";
+import { LIVE_WORDS } from "../step-words.js";
+import { doingNow } from "../activity-line.js";
 import { webSourcesIn, webUrl } from "../web-sources.js";
 import { Mascot, runMood } from "./Mascot.js";
 import { AgentSwitch, EngineMark, switchesAgent } from "./AgentSwitch.js";
@@ -244,6 +247,7 @@ import { ProofClipCard, ProofStatusCard } from "./ProofClipCard.js";
 import { TestProofCard } from "./TestProofCard.js";
 import { keyOf as commandKey } from "../test-proof.js";
 import { recordProofClip, testWork, useClipMode } from "./proof-clips.js";
+import { CheckBadge } from "./check-badge.js";
 import { hasUiChange } from "../preview-check.js";
 import { agentState, lowerWord, phaseRing, plainError, PHASE_WORD, saysItAll, type AgentRing } from "../agent-state.js";
 import { askIosPreview, isLocalUrl, lookOf, openInPreview, pageAppears, servedUrlIn } from "./previewBus.js";
@@ -251,7 +255,7 @@ import { failedWords, latestTests, prefillComposer, ReviewCard, secondReviewOf, 
 import { CLASS_LABEL, carefulClass, headlineClass, mayApprove } from "../command-class.js";
 import { plainRisk } from "../plain-risk.js";
 import { checkpointsByMessage, isRedo, isSetAside, reversedBy, rewindImpact, rewindsIn, undoneRuns, type Rewind } from "../rewind.js";
-import { Check, ContextMenu, MenuButton, Picker, useConfirm, type MenuItem, relTime } from "./ui.js";
+import { Check, ContextMenu, MenuButton, Picker, SkeletonRows, useConfirm, type MenuItem, relTime } from "./ui.js";
 import { RuleForm, RuleHow, RuleText } from "./RuleForm.js";
 import type { RuleCheck } from "../rules.js";
 import { hostApi, installedOn, useMachine } from "./local.js";
@@ -278,6 +282,9 @@ import { useVoice, VoiceBar, VoiceButton, VoiceLive } from "./VoiceMic.js";
 // Only a chat where an agent added to memory draws it: out of the first load (test/client-bundle.test.ts).
 const RememberedLine = lazy(() => import("./remembered-line.js").then((m) => ({ default: m.RememberedLine })));
 import { IdeLink } from "./ide/IdeLink.js";
+import { Guard } from "./guard.js";
+/** A file input that picks a folder, as every browser understands it (not in every version of the DOM types). */
+const FOLDER_PICK = { webkitdirectory: "", directory: "" } as Record<string, string>;
 
 // The activity section, built from AI Elements: the team's messages are chat
 // bubbles, each agent run is a chain of thought whose steps hold the tool
@@ -329,6 +336,9 @@ function textWidth(text: string, font: string): number {
 }
 
 /** An item's key in the feed, the same across renders, so a turn that moves keeps its element. */
+/** What a row is drawing now, so its guard tries again as it changes: a run's newest step, diff, drawing or end. */
+const rowStamp = (it: FeedItem): string =>
+  it.kind === "run" ? `${it.key}:${it.messages.at(-1)?.seq ?? 0}:${it.diffs.at(-1)?.seq ?? 0}:${it.drawn?.at(-1)?.seq ?? 0}:${it.ended?.seq ?? 0}` : it.kind === "notes" ? `${it.evs[0]!.seq}:${it.evs.length}` : String(it.ev.seq);
 const feedKey = (it: FeedItem) => (it.kind === "run" ? `run-${it.key}` : it.kind === "notes" ? `notes-${it.evs[0]!.seq}` : String(it.ev.seq));
 
 interface RunItem {
@@ -347,6 +357,11 @@ interface RunItem {
   checkpoint?: { sha: string; lane: string; /** The first step of the run it was taken for, when that is an earlier block. */ at?: number };
   /** When the run started, so the first thought can say how long it took. */
   startedTs?: number;
+  /**
+   * The same turn carrying on after a message cut its block short (a wake, a hold, another agent's word), with nothing new said
+   * yet: its live line says the step under way and its clock runs from the turn's start, not "Getting started · usually ~1 min".
+   */
+  carryOn?: true;
   /** When something else in the lane (a request for permission, a message, a handover) closed this block before the run ended, and what. */
   closedTs?: number;
   closedBy?: string;
@@ -646,57 +661,65 @@ function sameSet(a: Ev<"agent.diff">, b: Ev<"agent.diff">): boolean {
  * `streaming` is the lanes whose agent is working right now (a bare true means the main lane).
  */
 export { group as groupForTest };
-export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<string>): Item[] {
+/**
+ * `keep` carries the fold from one draw to the next: a new event is folded on to the blocks so far rather than the whole log
+ * grouped again, so it changes only its own run's block (spec 13, Arun 2026-11-24: "Go all out and fix these problems"; at
+ * 20,000 events grouping was a millisecond of every event). Folded again from the start when the log isn't the last one grown.
+ */
+export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<string>, keep?: { fold?: GroupFold }, skip?: { key: unknown; skip: (e: SessionEvent) => boolean }): Item[] {
   const live = typeof streaming === "boolean" ? (streaming ? new Set([MAIN_LANE]) : new Set<string>()) : streaming;
-  const items: Item[] = [];
+  // `skip`: what the feed leaves out of the log (notes nobody needs, a cleared chat), told apart by its `key`.
+  const f = keep?.fold && keep.fold.skipKey === skip?.key && foldGoesOn(keep.fold, events) ? keep.fold : undefined;
+  const items: Item[] = f?.items ?? [];
   /** Each lane's open run, and the one that just finished (for anything still arriving from it). */
-  const runs = new Map<string, RunItem>();
-  const lasts = new Map<string, RunItem>();
+  const runs = f?.runs ?? new Map<string, RunItem>();
+  const lasts = f?.lasts ?? new Map<string, RunItem>();
   /** Each run's block by the seq of the end that closed it, for an end that later corrects that one (run.ended `replaces`). */
-  const endedBy = new Map<number, RunItem>();
+  const endedBy = f?.endedBy ?? new Map<number, RunItem>();
   /** A run's end shown on its own (its run had no block), by seq, for the same. */
-  const endNotes = new Map<number, Extract<Item, { kind: "event" }>>();
+  const endNotes = f?.endNotes ?? new Map<number, Extract<Item, { kind: "event" }>>();
   /** Notices taken out of the feed once it is built (their run's real end was no failure). */
-  const gone = new Set<Item>();
+  const gone = f?.gone ?? new Set<Item>();
   /** Taken as a lane's run started; belongs to the block its first step opens. */
-  const checkpoints = new Map<string, RunItem["checkpoint"]>();
-  const startedAt = new Map<string, number>();
+  const checkpoints = f?.checkpoints ?? new Map<string, RunItem["checkpoint"]>();
+  const startedAt = f?.startedAt ?? new Map<string, number>();
   /** Every instruction by seq, so a run can say who asked for it and what they said. */
-  const instructions = new Map<number, { who: string; text: string } | undefined>();
+  const instructions = f?.instructions ?? new Map<number, { who: string; text: string } | undefined>();
   /** The instruction a lane's next run was started by. */
-  const asks = new Map<string, { who: string; text: string } | undefined>();
+  const asks = f?.asks ?? new Map<string, { who: string; text: string } | undefined>();
   /** The last real ask in each lane, which an approval answer stands in for. */
-  const lastAsk = new Map<string, { who: string; text: string }>();
+  const lastAsk = f?.lastAsk ?? new Map<string, { who: string; text: string }>();
   /** A block the team closed mid-run (a message queued, a pause): the turn carries on in the next block, still about its ask. */
-  const cutShort = new Map<string, RunItem>();
+  const cutShort = f?.cutShort ?? new Map<string, RunItem>();
   /** The asks of a run that stopped for an answer, handed to the run the answer starts. */
-  const carryAsked = new Map<string, RunItem["asked"]>();
+  const carryAsked = f?.carryAsked ?? new Map<string, RunItem["asked"]>();
   /** Commands that stopped to ask, by approval id, so the answer can find them. */
-  const askedById = new Map<string, { id: string; command: string; answer: "yes" | "no" | "pending" }>();
+  const askedById = f?.askedById ?? new Map<string, { id: string; command: string; answer: "yes" | "no" | "pending" }>();
   /** Each lane's last change set, attached to a run or not: one said again is left out. */
-  const lastDiff = new Map<string, Ev<"agent.diff">>();
+  const lastDiff = f?.lastDiff ?? new Map<string, Ev<"agent.diff">>();
   /** The last event the feed shows, so a diff can tell what it follows. */
-  let prevType = "";
+  let prevType = f?.prevType ?? "";
   /** Where each lane's loose change set stands in the feed, while nothing of that lane's has come after it. */
-  const looseAt = new Map<string, number>();
+  const looseAt = f?.looseAt ?? new Map<string, number>();
   /**
    * A lane's block the team closed while its turn was under way, until that agent's next turn is handed to it: what that turn
    * had written when it was stopped (an interrupted message, which the hub logs just after the stop) is its own, in its block.
    */
-  const stoppedTurn = new Map<string, RunItem>();
+  const stoppedTurn = f?.stoppedTurn ?? new Map<string, RunItem>();
   /** A lane's Stop note, until its agent next says anything: a turn stopped before its first message is drawn above it. */
-  const stopNote = new Map<string, Item>();
+  const stopNote = f?.stopNote ?? new Map<string, Item>();
   /** Blocks drawn just above a note that came before them in the log (stopNote). */
-  const above = new Map<RunItem, Item>();
+  const above = f?.above ?? new Map<RunItem, Item>();
   // A queued message changed is one message: the one it replaced, or the one taken back to be changed, isn't drawn beside it as
   // "Taken back before the agent read it" (2026-10-28 QA; Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
-  const edited = new Set<number>();
-  for (const ev of events) {
+  const edited = f?.edited ?? new Set<number>();
+  const added = ((x) => (skip ? x.filter((e) => !skip.skip(e)) : x))(f ? events.slice(f.log.length) : events);
+  for (const ev of added) {
     const b = ev.body;
     if (b.type === "instruction" && b.replaces !== undefined) edited.add(b.replaces);
     else if (b.type === "instruction.withdrawn" && b.toEdit) edited.add(b.seq);
   }
-  for (const ev of events) {
+  for (const ev of added) {
     const t = ev.body.type;
     if (t === "instruction" && edited.has(ev.seq)) continue;
     const lane = ev.lane ?? MAIN_LANE;
@@ -902,47 +925,154 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
     if (t === "run.ended") endNotes.set(ev.seq, item);
     items.push(item);
   }
+  const fold: GroupFold = { log: events, skipKey: skip?.key, prevType, items, runs, lasts, endedBy, endNotes, gone, checkpoints, startedAt, instructions, asks, lastAsk, cutShort, carryAsked, askedById, lastDiff, looseAt, stoppedTurn, stopNote, above, edited };
+  if (keep) keep.fold = fold;
+  // From here, what is drawn: the blocks as folded are left as they are, for the next event to be folded on to (drawnCopy).
+  const order = items.slice();
+  /** What drawing sets on a block, beside what the fold made of it. */
+  const post = new Map<Item, Partial<RunItem>>();
+  const put = (it: RunItem, x: Partial<RunItem>) => ((q) => (q ? Object.assign(q, x) : post.set(it, { ...x })))(post.get(it));
   // A turn stopped before its first message said anything: what it had written goes above the stop's note, where it was cut.
   for (const [run, note] of above) {
-    const from = items.indexOf(run);
-    const to = items.indexOf(note);
+    const from = order.indexOf(run);
+    const to = order.indexOf(note);
     if (from <= to || to === -1) continue;
-    items.splice(to, 0, ...items.splice(from, 1));
-    if (note.kind === "event") run.placeBefore = note.ev.seq;
+    order.splice(to, 0, ...order.splice(from, 1));
+    if (note.kind === "event") put(run, { placeBefore: note.ev.seq });
   }
   let n = 0;
   for (const lane of live) {
     const run = runs.get(lane);
-    if (run) run.streaming = true;
+    if (run) put(run, { streaming: true });
     // When it started, so its live line can time it before it has said anything ("Thinking · 3s").
-    else items.push({ kind: "run", lane, key: -1 - n++, messages: [], diffs: [], ended: null, streaming: true, startedTs: startedAt.get(lane), decided: [], asked: [] });
+    else {
+      // Cut short mid-turn and not heard from since: the turn under way, said as such (Arun, 2026-11-24, agents twenty minutes in
+      // read "Getting started · usually ~1 min" after a wake or another agent's message reached them).
+      const was = cutShort.get(lane);
+      const startedTs = startedAt.get(lane) ?? was?.startedTs;
+      order.push({ kind: "run", lane, key: -1 - n++, messages: [], diffs: [], ended: null, streaming: true, ...(startedTs !== undefined ? { startedTs } : {}), decided: [], asked: [], ...(was ? { carryOn: true as const } : {}) });
+    }
   }
   // A run whose change set is the same as the last one shown on its lane changed nothing itself: credited to the run that did.
   const shownSet = new Map<string, { by: RunItem; ev: Ev<"agent.diff"> }>();
-  for (const it of items) {
+  for (const it of order) {
     if (it.kind !== "run" || !it.diffs.length) continue;
     const last = it.diffs.at(-1)!;
-    const files = last.body.files;
     const before = shownSet.get(it.lane);
-    if (before && sameSet(before.ev, last)) {
-      it.unchanged = true;
+    const c = setAgainst(before?.ev, last);
+    if (c.same) {
       // Never its own ask: it didn't make these changes.
-      if (before.by.ask) it.ask = before.by.ask;
-      else delete it.ask;
+      put(it, { unchanged: true, ask: before!.by.ask });
     } else {
-      // Some of it changed: what is untouched since the last card isn't this run's (a patch to compare, or it can't be told).
-      const was = new Map(before?.ev.body.files.map((f) => [f.path, f]));
-      const earlier = files
-        .filter((f) => {
-          const p = was.get(f.path);
-          return !!p && !!(f.patch || f.later || f.at) && samePatch(p, before!.ev.seq, f, last.seq);
-        })
-        .map((f) => f.path);
-      if (earlier.length) it.earlier = earlier;
+      if (c.earlier.length) put(it, { earlier: c.earlier });
       shownSet.set(it.lane, { by: it, ev: last });
     }
   }
-  return gone.size ? items.filter((it) => !gone.has(it)) : items;
+  return (gone.size ? order.filter((it) => !gone.has(it)) : order).map((it) => drawnCopy(it, post.get(it)));
+}
+
+/** Each change set against the one shown before it on its lane, worked out once: asked of every run on every event (spec 13). */
+const setsAgainst = new WeakMap<Ev<"agent.diff">, { to: Ev<"agent.diff"> | undefined; same: boolean; earlier: string[] }>();
+function setAgainst(before: Ev<"agent.diff"> | undefined, last: Ev<"agent.diff">): { same: boolean; earlier: string[] } {
+  const was = setsAgainst.get(last);
+  if (was && was.to === before) return was;
+  const same = !!before && sameSet(before, last);
+  // Some of it changed: what is untouched since the last card isn't this run's (a patch to compare, or it can't be told).
+  const had = new Map(before?.body.files.map((f) => [f.path, f]));
+  const earlier = same
+    ? []
+    : last.body.files
+        .filter((f) => {
+          const p = had.get(f.path);
+          return !!p && !!(f.patch || f.later || f.at) && samePatch(p, before!.seq, f, last.seq);
+        })
+        .map((f) => f.path);
+  const out = { to: before, same, earlier };
+  setsAgainst.set(last, out);
+  return out;
+}
+
+/** group's fold so far: the blocks and what it keeps to go on with (see group). */
+interface GroupFold {
+  /** The events folded, to tell this log grown from another one, and what was left out of them. */
+  log: SessionEvent[];
+  skipKey: unknown;
+  prevType: string;
+  items: Item[];
+  runs: Map<string, RunItem>;
+  lasts: Map<string, RunItem>;
+  endedBy: Map<number, RunItem>;
+  endNotes: Map<number, Extract<Item, { kind: "event" }>>;
+  gone: Set<Item>;
+  checkpoints: Map<string, RunItem["checkpoint"]>;
+  startedAt: Map<string, number>;
+  instructions: Map<number, { who: string; text: string } | undefined>;
+  asks: Map<string, { who: string; text: string } | undefined>;
+  lastAsk: Map<string, { who: string; text: string }>;
+  cutShort: Map<string, RunItem>;
+  carryAsked: Map<string, RunItem["asked"]>;
+  askedById: Map<string, RunItem["asked"][number]>;
+  lastDiff: Map<string, Ev<"agent.diff">>;
+  looseAt: Map<string, number>;
+  stoppedTurn: Map<string, RunItem>;
+  stopNote: Map<string, Item>;
+  above: Map<RunItem, Item>;
+  edited: Set<number>;
+}
+
+/** On a block as folded: its copy as last drawn, and what it was drawn from (a property, not a map: asked of every block per event). */
+const DRAWN = Symbol("drawn");
+type Drawn = { [DRAWN]?: { sig: unknown[]; copy: Item } };
+
+/**
+ * Whether the fold goes on over `events`: the same events it folded, in place, with more after them, none of them a change to a
+ * message already folded (an edit: the message it replaces is left out, from wherever it was).
+ */
+function foldGoesOn(f: GroupFold, events: SessionEvent[]): boolean {
+  if (events.length < f.log.length) return false;
+  for (let i = 0; i < f.log.length; i++) if (events[i] !== f.log[i]) return false;
+  for (let i = f.log.length; i < events.length; i++) {
+    const b = events[i]!.body;
+    if ((b.type === "instruction" && b.replaces !== undefined) || (b.type === "instruction.withdrawn" && b.toEdit)) return false;
+  }
+  return true;
+}
+
+/**
+ * A block as it is drawn: a copy, so the fold can go on changing its own, with what drawing sets on it. The same copy as last
+ * time while nothing in it has changed, so a run no event touched is the same item, and only the run an event changed is new.
+ */
+function drawnCopy(it: Item, p: Partial<RunItem> | undefined): Item {
+  const was = (it as Drawn)[DRAWN];
+  // Read without making anything: this is asked of every block in the feed on every event.
+  if (was) {
+    const s = was.sig;
+    if (it.kind === "event" ? s[0] === it.ev : sigOf(it, p, s)) return was.copy;
+  }
+  const sig = it.kind === "event" ? [it.ev] : (sigOf(it, p) as unknown[]);
+  let copy: Item;
+  if (it.kind === "event") copy = { kind: "event", ev: it.ev };
+  else {
+    copy = { ...it, messages: [...it.messages], diffs: [...it.diffs], decided: [...it.decided], asked: it.asked.map((a) => ({ ...a })), ...(it.drawn ? { drawn: [...it.drawn] } : {}), ...p };
+    if (p && "ask" in p && !p.ask) delete copy.ask;
+  }
+  // Not enumerable: a copy made by spreading the block mustn't carry it.
+  Object.defineProperty(it, DRAWN, { value: { sig, copy }, writable: true, configurable: true });
+  return copy;
+}
+
+/** What a block's copy was drawn from (drawnCopy): with `was`, whether it is still that; without, the list of it. */
+function sigOf(it: RunItem, p: Partial<RunItem> | undefined, was?: unknown[]): unknown[] | boolean {
+  const ask = p && "ask" in p ? p.ask : it.ask;
+  // The same list while its change sets are the same ones (setAgainst keeps it): told apart by itself, not by its text.
+  const earlier = p?.earlier;
+  if (!was) return [it.messages.length, it.diffs.length, it.ended, it.closedTs, it.closedSeq, it.closedBy, it.decided.length, it.drawn?.length, p?.streaming, p?.placeBefore, p?.unchanged, ask, earlier, ...it.asked.map((a) => a.answer)];
+  return (
+    was.length === 13 + it.asked.length &&
+    was[0] === it.messages.length && was[1] === it.diffs.length && was[2] === it.ended && was[3] === it.closedTs && was[4] === it.closedSeq && was[5] === it.closedBy &&
+    was[6] === it.decided.length && was[7] === it.drawn?.length && was[8] === p?.streaming && was[9] === p?.placeBefore && was[10] === p?.unchanged && was[11] === ask && was[12] === earlier &&
+    it.asked.every((a, k) => was[13 + k] === a.answer)
+  );
 }
 
 /** No Jump menu under the box, in any edition (2026-11-04: "get rid of this for my local and open source builds", then the hosted service to follow the local build). Its keys (g d, g q…) stay. */
@@ -950,6 +1080,8 @@ const JUMP_MENU = false;
 
 /** How many of the feed's newest items are drawn; the rest wait behind "Show earlier" (see `start` in Activity). */
 export const FEED_WINDOW = 100;
+/** How many a session's first draw takes, the rest of the window following at once (see `warm` in Activity). */
+const FIRST_WINDOW = 4;
 
 /** Scroll the feed to the item that holds this point in the log, and let it flash once. */
 export function jumpTo(seq: number, again = true): void {
@@ -1271,7 +1403,7 @@ export function Activity({
   // a yes. Only from what arrives after the room opened, never while words are in the box, and it says when it moves.
   const seenFollow = useRef(events.at(-1)?.seq ?? 0);
   useEffect(() => {
-    const fresh = events.filter((e) => e.seq > seenFollow.current);
+    const fresh = eventsAfter(events, seenFollow.current);
     seenFollow.current = events.at(-1)?.seq ?? seenFollow.current;
     if (pin || !fresh.length) return;
     const typing = !!(document.getElementById("composer-input") as HTMLTextAreaElement | null)?.value.trim();
@@ -1301,16 +1433,14 @@ export function Activity({
     return () => window.removeEventListener("friday:focus-lane", on);
   }, [pin]);
   const lanes = state.lanes;
-  const index = useMemo(() => {
-    const results = new Map<string, Ev<"tool.result">>();
-    const questions = new Map<string, Ev<"agent.question">>();
-    for (const e of events) {
-      const b = e.body;
-      if (b.type === "tool.result") results.set(b.callId, e as Ev<"tool.result">);
-      else if (b.type === "agent.question") questions.set(b.callId, e as Ev<"agent.question">);
-    }
-    return { results, questions, delivered: deliveredIn(events) };
-  }, [events]);
+  // Carried on over each event as it comes, rather than made again from the whole log (log-memo.ts).
+  const index = useLogFold(events, () => ({ results: new Map<string, Ev<"tool.result">>(), questions: new Map<string, Ev<"agent.question">>(), delivered: new Set<number>() }), (x, e) => {
+    const b = e.body;
+    if (b.type === "tool.result") x.results.set(b.callId, e as Ev<"tool.result">);
+    else if (b.type === "agent.question") x.questions.set(b.callId, e as Ev<"agent.question">);
+    else if (b.type === "instructions.delivered" || b.type === "run.started") for (const q of deliveredIn([e])) x.delivered.add(q);
+    return x;
+  });
   /**
    * Something is happening, said before the model has said anything.
    *
@@ -1379,22 +1509,25 @@ export function Activity({
   const streamKey = workingLanes.join(",");
   // The notes nobody needs (session-notes.ts): an agent dropping off and straight back, the same connection again, the
   // wheel on Solo. Still in the log and in History; just not in the conversation.
-  const quiet = useMemo(() => hiddenNotes(events, me.id, !!solo), [events, me.id, solo]);
+  const quiet = useLogMemo(events, (l) => hiddenNotes(l as SessionEvent[], me.id, !!solo), (e) => NOTE_TYPES.has(e.body.type), `${me.id}|${!!solo}`);
   // The names of lanes this log has had, for any since taken away (agentNameFor).
   laneNamesFrom(events);
   learnLanes(events);
   // A crew mate's home chat deleted (lane.cleared): what came before it is gone from its conversation. Only the feed leaves it
   // out; the session's state stays whole.
   const cleared = state.cleared;
-  const items = useMemo(() => {
-    const cut = (e: SessionEvent) => !!cleared && e.seq <= (cleared[e.lane ?? MAIN_LANE] ?? 0);
-    const shown = quiet.size || cleared ? events.filter((e) => !quiet.has(e.seq) && !cut(e)) : events;
-    return foldNotes(group(shown, new Set(streamKey ? streamKey.split(",") : [])));
-  }, [events, streamKey, quiet, cleared]);
+  // The feed's grouping, carried from one event to the next (group's `keep`).
+  const grouped = useRef<{ fold?: GroupFold }>({});
+  const clearedKey = JSON.stringify(cleared ?? null);
+  const quietKey = useMemo(() => [...quiet].join(","), [quiet]);
+  const items = useMemo(
+    () => foldNotes(group(events, new Set(streamKey ? streamKey.split(",") : []), grouped.current, { key: `${quietKey}|${clearedKey}`, skip: (e) => quiet.has(e.seq) || (!!cleared && e.seq <= (cleared[e.lane ?? MAIN_LANE] ?? 0)) })),
+    [events, streamKey, quietKey, clearedKey], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   // A run block belongs to the lane that produced it.
   const laneOfItem = (it: FeedItem) => (it.kind === "event" ? it.ev.lane : it.kind === "notes" ? it.evs[0]?.lane : it.lane) ?? MAIN_LANE;
   // Which permission requests somebody answered, by id: those stay as a one-line receipt saying who said what (ApprovalReceipt).
-  const answeredIds = useMemo(() => new Set(events.flatMap((e) => (e.body.type === "instruction" && e.body.approval ? [e.body.approval.id] : []))), [events]);
+  const answeredIds = useLogFold(events, () => new Set<string>(), (ids, e) => (e.body.type === "instruction" && e.body.approval ? ids.add(e.body.approval.id) : ids));
   const logOrder = items.filter(
     (it) =>
       // An agent brought in is a note for the others in a shared session; on your own the new tab says it.
@@ -1404,7 +1537,9 @@ export function Activity({
       !(it.kind === "event" && it.ev.body.type === "engine.approval" && state.approvals[it.ev.lane ?? MAIN_LANE]?.id !== it.ev.body.id && !answeredIds.has(it.ev.body.id)) &&
       (filter === "all" ? true : filter === "agent" ? it.kind === "run" || (it.kind === "event" && it.ev.body.type === "run.ended") : it.kind !== "run" && !(it.kind === "event" && it.ev.body.type === "run.ended")) &&
       // An aside is to the people in the room, not to one agent: it shows whichever agent's feed you are looking at.
-      (laneFilter === "all" || laneOfItem(it) === laneFilter || (it.kind === "event" && it.ev.body.type === "chat")),
+      (laneFilter === "all" || laneOfItem(it) === laneFilter || (it.kind === "event" && it.ev.body.type === "chat")) &&
+      // A press on a card an agent drew is said in the card itself (GenUI.tsx), not again as a message of the person's.
+      !(it.kind === "event" && it.ev.body.type === "instruction" && it.ev.body.card),
   );
   // The newest block of each agent: that is the one that is live, and the one that offers review.
   // The point of the session, for the pinned line; and where the new part starts, fixed at the read mark this person opened with.
@@ -1415,7 +1550,7 @@ export function Activity({
   // Only what is news counts: something an agent said or another person wrote. Friday's notes and settings changes made as you
   // (a new teammate's effort set as it was made) put "New since you looked" over a chat with nothing new in it (2026-10-27 audit).
   const news = (e: SessionEvent) => e.actor.id !== me.id && ((e.body.type === "agent.message" && !!e.body.text.trim()) || ((e.body.type === "instruction" || e.body.type === "suggestion" || e.body.type === "chat") && e.actor.kind === "human"));
-  const firstUnseen = seenAtOpen.current ? events.find((e) => e.seq > seenAtOpen.current! && e.seq <= lastAtOpen.current && news(e))?.seq : undefined;
+  const firstUnseen = seenAtOpen.current ? eventsAfter(events, seenAtOpen.current).find((e) => e.seq > seenAtOpen.current! && e.seq <= lastAtOpen.current && news(e))?.seq : undefined;
   const seqOfItem = (it: FeedItem) => (it.kind === "run" ? it.key : it.kind === "notes" ? it.evs[0]!.seq : it.ev.seq);
   // A turn that was stopped sits where it was stopped, above the Stop's note, though what it had written was logged just after it.
   const lastOfItem = (it: FeedItem) =>
@@ -1429,8 +1564,14 @@ export function Activity({
   const lastRunKeys = new Map<string, number>();
   /** The last two runs of each agent, which stay open; a finished run older than that folds to one line. */
   const recentRunKeys = new Map<string, number[]>();
-  for (const it of items) if (it.kind === "run") recentRunKeys.set(it.lane, [...(recentRunKeys.get(it.lane) ?? []), it.key].slice(-2));
-  for (const i of items) if (i.kind === "run") lastRunKeys.set(i.lane, i.key);
+  for (const it of items) {
+    if (it.kind !== "run") continue;
+    lastRunKeys.set(it.lane, it.key);
+    const r = recentRunKeys.get(it.lane);
+    if (!r) recentRunKeys.set(it.lane, [it.key]);
+    else if (r.length < 2) r.push(it.key);
+    else (r[0] = r[1]!), (r[1] = it.key);
+  }
   // All agents at once: each turn where it finished, so the agent that just finished settles above the ones still working and
   // the one at work stays at the bottom, in view (agent-order.ts). Held as it was while someone reads further up, and put in
   // order once they are back at the bottom, so nothing moves under the words being read.
@@ -1463,7 +1604,7 @@ export function Activity({
         new Set(workingLanes),
       )
     : logOrder;
-  const shownOrder = useRef<string[]>([]);
+  const shownOrder = useRef<() => string[]>(() => []);
   // The lead's turns the Team room has shown as its answers, which stay shown (team-room.ts leadAnswers).
   const leadShown = useRef(new Set<string>());
   // How each teammate stands in this chat, for its faces and working line, rather than across every room (Teammates.tsx statusIn).
@@ -1473,12 +1614,11 @@ export function Activity({
   const laneRunsKey = state.options.team ? Object.entries(state.laneRuns).map(([l, r]) => `${l}:${r.status}:${waitsOnPerson(state, l) ? 1 : 0}`).join(",") : "";
   useEffect(() => void (state.options.team && noteLaneRuns(sid, state.laneRuns, (l) => waitsOnPerson(state, l))), [sid, laneRunsKey, state.options.team]);
   useEffect(() => () => forgetLaneRuns(sid), [sid]);
-  const feedOrder = following || !ordering ? finishing.map(feedKey) : heldOrder(shownOrder.current, finishing.map(feedKey));
-  shownOrder.current = feedOrder;
-  const byKey = new Map(finishing.map((it) => [feedKey(it), it] as const));
-  let visible = feedOrder.map((k) => byKey.get(k)!);
-  // A press on a card an agent drew is said in the card itself (GenUI.tsx), not again as a message of the person's.
-  visible = visible.filter((it) => !(it.kind === "event" && it.ev.body.type === "instruction" && it.ev.body.card));
+  // Following, or one agent: the feed is in finishing order as it is, and its keys are only made if someone reads further up (spec 13).
+  const feedOrder = following || !ordering ? null : heldOrder(shownOrder.current(), finishing.map(feedKey));
+  shownOrder.current = feedOrder ? () => feedOrder : ((was: FeedItem[], keys?: string[]) => () => (keys ??= was.map(feedKey)))(finishing);
+  const byKey = feedOrder && new Map(finishing.map((it) => [feedKey(it), it] as const));
+  let visible = feedOrder ? feedOrder.map((k) => byKey!.get(k)!) : finishing;
   // Who is speaking over an agent's items: in a team its mascot and name already head every message.
   let tags = true;
   if (state.options.team) tags = false;
@@ -1607,6 +1747,14 @@ export function Activity({
     return it.kind === "event" && (it.ev.body.type === "instruction" || it.ev.body.type === "suggestion") && next?.kind === "run" && next.lane === laneOfItem(it);
   };
   // One agent's catch-up takes the place of the session's line: two "new since" lines in one feed would disagree.
+  // A session's first draw is its newest few items, the rest of the window in a task of its own just after: all at once, opening a
+  // long session was one 80 ms stall (spec 13). Where nothing watches what is in view (a test), all at once as before.
+  const [warm, setWarm] = useState(typeof IntersectionObserver === "undefined");
+  useEffect(() => {
+    if (warm || !visible.length) return;
+    const t = setTimeout(() => setWarm(true), 0);
+    return () => clearTimeout(t);
+  }, [warm, visible.length > 0]); // eslint-disable-line react-hooks/exhaustive-deps
   const agentUnreadAt = catchUp.current && catchUp.current.lane === laneFilter ? catchUpIndex(visible.map((it) => ({ lane: laneOfItem(it), last: lastOfItem(it) })), catchUp.current.lane, catchUp.current.seq) : -1;
   let breaks: (string | null)[] = [];
   // A long team chat's days, each with a divider (team-status.ts dayBreaks; Arun, 2026-10-28).
@@ -1615,15 +1763,16 @@ export function Activity({
   // The newest FEED_WINDOW items, and the rest behind "Show earlier": a crew's day drew every item it ever had, 18,000 elements
   // after half an hour of six agents (2026-11-04 soak), and the room slowed as the day went on. Opened back to a point (a press,
   // a jump, the "new since you looked" line), it stays open from there as new items arrive.
-  let start = Math.max(0, visible.length - FEED_WINDOW);
+  let start = Math.max(0, visible.length - (warm ? FEED_WINDOW : FIRST_WINDOW));
   // From the item that holds that point: the last one starting at or before it.
   if (from !== null) start = Math.min(start, Math.max(0, visible.findLastIndex((it) => seqOfItem(it) <= from)));
   if (unreadAt !== -1 && unreadAt < start) start = Math.max(0, unreadAt - 3);
   // Each lane's last turn the feed shows, ended: where a crew teammate's stopped plan is said (PlanStopped).
   const lastShownRun = new Map<string, number>();
   for (const it of visible) if (it.kind === "run") lastShownRun.set(it.lane, it.key);
-  const lastCommitSeq = events.findLast((e) => e.body.type === "folder.committed" && !e.body.error)?.seq ?? 0;
-  const lastApplySeq = events.findLast((e) => e.body.type === "folder.applied")?.seq ?? 0;
+  const lastCommit = useLogFold<SessionEvent | undefined>(events, () => undefined, (was, e) => (e.body.type === "folder.committed" && !e.body.error ? e : was));
+  const lastCommitSeq = lastCommit?.seq ?? 0;
+  const lastApplySeq = useLogFold(events, () => 0, (was, e) => (e.body.type === "folder.applied" ? e.seq : was));
   // While the driver has the session open, reviewers' comments on its pull
   // request reach the agent on their own, a few minutes at most after they are
   // written. Quiet when there is nothing new; it stops at the first real error
@@ -1632,6 +1781,7 @@ export function Activity({
   // and tell the panel to look rather than wait for its next poll. Only for
   // what just happened, so loading an old session doesn't throw panels open.
   const shown = useRef(0);
+  const lookedTo = useRef(0);
   // Whether an address on the machine doing the work has a page to show, asked of its runner (preview.fetch): the Preview opens
   // by itself only on a page, never on a server with nothing to look at (Arun, 2026-10-20).
   const lookAt = (port: number, path: string) => hostApi<{ status: number; type: string }>(identity, "/api/runner/preview.fetch", { method: "POST", body: JSON.stringify({ port, path, probe: true }) }).then(lookOf);
@@ -1645,7 +1795,8 @@ export function Activity({
     // On the call, not the result: installing dependencies can take minutes,
     // and the panel shows that as it happens.
     if (secondary) return;
-    const ev = events.findLast((e) => e.body.type === "agent.message" && e.body.toolCalls.some((c) => c.name === "show_preview"));
+    const ev = eventsAfter(events, Math.max(shown.current, lookedTo.current)).findLast((e) => e.body.type === "agent.message" && e.body.toolCalls.some((c) => c.name === "show_preview"));
+    lookedTo.current = Math.max(lookedTo.current, events.at(-1)?.seq ?? 0);
     if (!ev || ev.seq <= shown.current) return;
     shown.current = ev.seq;
     if (Date.now() - ev.ts > 60_000) return;
@@ -1668,9 +1819,10 @@ export function Activity({
   const asked = useRef(0);
   useEffect(() => {
     if (secondary) return;
-    const fresh = events.filter((e) => e.seq > asked.current && e.body.type === "preview.asked");
+    const fresh = eventsAfter(events, asked.current).filter((e) => e.seq > asked.current && e.body.type === "preview.asked");
+    // Looked at up to here: the next event is looked at alone, not the whole log again (spec 13).
+    asked.current = Math.max(asked.current, events.at(-1)?.seq ?? 0);
     if (!fresh.length) return;
-    asked.current = fresh.at(-1)!.seq;
     for (const e of fresh) {
       if (e.body.type !== "preview.asked" || Date.now() - e.ts > 60_000) continue;
       if (e.body.ios) {
@@ -1687,9 +1839,9 @@ export function Activity({
   const shownUrl = useRef("");
   useEffect(() => {
     if (secondary) return;
-    const fresh = events.filter((e) => e.seq > said.current && e.body.type === "agent.message" && !!state.engines[e.lane ?? MAIN_LANE]?.tool);
+    const fresh = eventsAfter(events, said.current).filter((e) => e.seq > said.current && e.body.type === "agent.message" && !!state.engines[e.lane ?? MAIN_LANE]?.tool);
+    said.current = Math.max(said.current, events.at(-1)?.seq ?? 0);
     if (!fresh.length) return;
-    said.current = fresh[fresh.length - 1]!.seq;
     const recent = fresh.filter((e) => Date.now() - e.ts < 60_000);
     // A site a server says it is serving, not any local address: an API, a database or a model server mentioned in code is not
     // something to look at (servedUrlIn).
@@ -1705,7 +1857,7 @@ export function Activity({
     shownUrl.current = url;
     openIfPage(url);
   }, [events]); // eslint-disable-line react-hooks/exhaustive-deps
-  const watchedPr = lastCommitSeq ? (events.find((e) => e.seq === lastCommitSeq)?.body as { prUrl?: string; prCreated?: boolean } | undefined) : undefined;
+  const watchedPr = lastCommit?.body as { prUrl?: string; prCreated?: boolean } | undefined;
   const watching = !secondary && !!watchedPr?.prUrl && !!watchedPr.prCreated && state.driver?.id === me.id && state.run.status !== "running";
   useEffect(() => {
     if (!watching) return;
@@ -1721,10 +1873,11 @@ export function Activity({
       clearInterval(timer);
     };
   }, [watching, lastCommitSeq]); // eslint-disable-line react-hooks/exhaustive-deps
-  const rewinds = useMemo(() => rewindsIn(events), [events]);
-  const checkpoints = useMemo(() => checkpointsByMessage(events), [events]);
-  const lastRestoreSeq = events.findLast((e) => e.body.type === "folder.restored")?.seq ?? 0;
-  const undone = useMemo(() => undoneRuns(events), [events]);
+  // Made again only when an event they read is added (log-memo.ts): at 20,000 events these were most of an event's cost (spec 13).
+  const rewinds = useLogMemo(events, (l) => rewindsIn(l as SessionEvent[]), (e) => e.body.type === "folder.restored");
+  const checkpoints = useLogMemo(events, (l) => checkpointsByMessage(l as SessionEvent[]), (e) => e.body.type === "instruction" || e.body.type === "run.started" || e.body.type === "run.checkpoint");
+  const lastRestoreSeq = useLogFold(events, () => 0, (was, e) => (e.body.type === "folder.restored" ? e.seq : was));
+  const undone = useLogMemo(events, (l) => undoneRuns(l as SessionEvent[]), (e) => e.body.type === "run.started" || e.body.type === "run.checkpoint" || e.body.type === "run.ended" || e.body.type === "folder.restored");
   // A quote goes to this column's own box, not to every box open (a split has one a column; a window event reached them all).
   const quoteBox = useRef<QuoteBox | null>(null);
   const quoteTo = useRef<(text: string, from: string | null) => void>(() => {});
@@ -1734,8 +1887,9 @@ export function Activity({
   // `state` is changed in place by each event, which changes `events` too, so `events` stands for both.
   // Two agents' messages to each other since the person last wrote, as one card at the latest (Huddle.tsx); a crew's room keeps its own talk.
   // One agent handing work to two or more others: the whole team as one live card where it was handed out (TeamCard.tsx), shown in Everything.
-  const teams = useMemo(() => (state.options.team || laneFilter !== ALL ? undefined : teamsIn(events, () => true)), [events, laneFilter, state.options.team]);
-  const huddles = useMemo(() => (state.options.team ? undefined : huddlesIn(events, (e) => laneFilter === ALL || (e.lane ?? MAIN_LANE) === laneFilter, teams)), [events, laneFilter, state.options.team, teams]);
+  // Both read only messages: made again when one is added (log-memo.ts), not on every event (spec 13).
+  const teams = useLogMemo(events, (l) => (state.options.team || laneFilter !== ALL ? undefined : teamsIn(l, () => true)), (e) => e.body.type === "instruction", `${laneFilter}|${!!state.options.team}`);
+  const huddles = useLogMemo(events, (l) => (state.options.team ? undefined : huddlesIn(l, (e) => laneFilter === ALL || (e.lane ?? MAIN_LANE) === laneFilter, teams)), (e) => e.body.type === "instruction", useMemo(() => ({}), [laneFilter, state.options.team, teams]));
   const ctx: Ctx = useMemo(
     () => ({ me, plan, ...(solo ? { solo } : {}), ...(soloSure ? { soloSure } : {}), connections, state, ...index, ...(huddles ? { huddles } : {}), ...(teams?.size ? { teams } : {}), send, sid, invite, notify, identity, echo, quote, quoteBox, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, ...(onOpen ? { onOpen } : {}), ...(onConnect ? { onConnect } : {}), ...(agents ? { agents } : {}), ...(presence ? { presence } : {}), ...(replayLink ? { replayLink } : {}), ...(replaying ? { replaying } : {}), ...(inRoom ? { room: true } : {}) }),
     [me, plan, solo, soloSure, connections, state, index, huddles, teams, send, sid, invite, notify, identity, echo, quote, quoteBox, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, onOpen, onConnect, agents, presence, replayLink, replaying, inRoom],
@@ -2362,6 +2516,8 @@ export function Activity({
                       {agentNameFor(state, lane.id)}
                     </span>
                   )}
+                  {/* One row that can't be drawn is one quiet line, not the whole window (guard.tsx). */}
+                  <Guard where="feed row" reset={rowStamp(it)}>
                   {it.kind === "run" ? (
                     <>
                       {teamGroup?.(it) ?? teamRun?.(it) ?? <RunBlock item={it} ctx={ctx} folded={!!it.ended && !(recentRunKeys.get(it.lane) ?? []).includes(it.key)} latest={it.key === lastRunKeys.get(it.lane)} handed={it.key === lastRunKeys.get(it.lane) && !!handedLane(state, it.lane)} active={!it.ended && it.key === lastRunKeys.get(it.lane) && it.closedBy !== "run.pause" && it.closedBy !== "run.cancel" && runOf(state, it.lane).status !== "idle" && runOf(state, it.lane).status !== "error"} typing={it.streaming ? typingOf(streams[it.lane]) : null} />}
@@ -2372,6 +2528,7 @@ export function Activity({
                   ) : (
                     teamGroup?.(it) ?? <EventItem ev={it.ev} ctx={ctx} />
                   )}
+                  </Guard>
                 </FeedRow>
               );
             })}
@@ -2775,7 +2932,11 @@ function SystemAsk({ ev }: { ev: Ev<"instruction"> }) {
         ? "Friday handed the failing checks to the agent"
         : t.startsWith("[review]")
           ? "Friday passed the new review comments to the agent"
-          : "Friday asked the agent to carry on";
+          : t.startsWith("The check failed: ")
+            ? "The Captain sent the failing check back to the agent"
+            : t.startsWith("[Friday] The parts of ")
+              ? "The Captain asked the agent to look over the parts together"
+              : "Friday asked the agent to carry on";
   return (
     <div className="sys-ask">
       <Notice ev={ev} icon={ev.actor.id === "reviewer" ? ShieldCheckIcon : ev.body.keepGoing ? PlayIcon : GitPullRequestIcon} tone="control">
@@ -4114,7 +4275,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const via = reviewVia(ctx.state, ctx.me, lane);
   const ran = item.ended ? testsIn(msgs.flatMap((m) => m.body.toolCalls), (id) => (ctx.results.has(id) ? commandFailed(ctx.results.get(id)!.body) : null)) : null;
   // Its failures against the commit its copy started from, once Friday has worked that out (baseline.ts, app.ts testsAfterRun).
-  const based = ran?.status === "fail" && item.ended ? ctx.events.findLast((e) => e.body.type === "tests.base" && e.body.run === item.ended!.seq && (e.lane ?? MAIN_LANE) === lane) : undefined;
+  const based = ran?.status === "fail" && item.ended ? ofType(ctx.events, "tests.base", ctx.sid).findLast((e) => e.body.run === item.ended!.seq && (e.lane ?? MAIN_LANE) === lane) : undefined;
   const tests = ran && based?.body.type === "tests.base" ? { ...ran, base: { pre: based.body.pre, fresh: based.body.fresh, ...(based.body.whole !== undefined ? { whole: based.body.whole } : {}) } } : ran;
 
   // A teammate speaks as its face (Teammates.tsx), not its tool's mark.
@@ -4580,9 +4741,10 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // unless its ask was sent again since, when that turn is its retry (Arun's e2e pass, 2026-11-04: RISKY after a crash still had the
   // lone icon, being no longer the newest).
   const retryText = item.ask?.text?.trim() ?? "";
-  const askedAgain = !!item.ended && ctx.events.some((e) => e.seq > item.ended!.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "instruction" && e.body.text.trim() === retryText);
+  // Looked for last, only on the card that could offer it: every card asked it of the whole log on every event (spec 13).
+  const askedAgain = () => !!item.ended && eventsAfter(ofType(ctx.events, "instruction", ctx.sid), item.ended.seq).some((e) => (e.lane ?? MAIN_LANE) === lane && e.body.text.trim() === retryText);
   // Who may send it again is the one rule (agent-state.ts retry): whoever is in control and the owner; anyone else asks them.
-  const retryable = !active && !finalMsg && !!item.ended && ended?.outcome === "error" && !planLimitHit(ended.error) && !out && !askedAgain && latest && !!retryText && runOf(ctx.state, lane).status !== "running";
+  const retryable = !active && !finalMsg && !!item.ended && ended?.outcome === "error" && !planLimitHit(ended.error) && !out && latest && !!retryText && runOf(ctx.state, lane).status !== "running" && !askedAgain();
   const retryBtn = retryable ? <RetryAction ctx={ctx} lane={lane} text={retryText} className="rsp-text-btn rsp-retry" /> : null;
   // The rewind icon only in a reply's own action row, beside copy and the thumbs: a turn that stopped with no reply drew it alone on a
   // line of its own (audit CODE-19). Its files go back from its change card's Undo, or from the message's own rewind.
@@ -4623,8 +4785,9 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         {...(ctx.onOpen ? { onReview: (path?: string) => (ctx.onOpen!("files"), path && showDiffSoon(path, [0, 350, 900, 1700])) } : {})}
       />
     ) : null;
-  const branchNow = branchAt(ctx.events, lane, item.ended?.seq ?? Infinity) ?? ctx.state.engines[lane]?.branch;
-  const reviewable = chatty && !!review && !!branchNow && !ctx.state.options.work;
+  // Only where it is shown: every card read back through the log for it on every event (spec 13).
+  const branchNow = () => branchAt(ofTypes(ctx.events, BRANCH_EVENTS, ctx.sid), lane, item.ended?.seq ?? Infinity) ?? ctx.state.engines[lane]?.branch;
+  const reviewable = chatty && !!review && !ctx.state.options.work && !!branchNow();
   // A finished run of a crew mate's, asked by a person: offered again as a routine (AGAIN).
   const againMate = chatty && !!item.ended && ended?.outcome === "done" && !active && !!item.ask?.text?.trim() && !/^\[(Check-in|Friday)\]/.test(item.ask.text) ? mateOn(lane) : undefined;
   const againable = !!againMate && ctx.me.role !== "viewer" && (againMate.checkins?.length ?? 0) < 12;
@@ -4684,8 +4847,15 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // Test it, offered under finished work as Devin does (Arun, 2026-11-22: "Devin's way, in chat"): the tests it ran, or the project's
   // own, and a proof clip when it changed a page. Shown on the latest run that changed something, until proof of it is in the chat.
   const endSeq = item.ended?.seq ?? 0;
-  const proven = ctx.events.some((e) => e.seq > endSeq && (e.lane ?? MAIN_LANE) === lane && (e.body.type === "proof.tests" || e.body.type === "proof.clip" || e.body.type === "proof.status"));
-  const clipable = isLocal() && latest && !active && !!item.ended && ended?.outcome === "done" && clipMode !== "off" && !!laneDiff?.files.length && !proven;
+  // Looked for only on the card that could offer it, not on every card the feed draws (spec 13).
+  const proven = () => eventsAfter(ctx.events, endSeq).some((e) => e.seq > endSeq && (e.lane ?? MAIN_LANE) === lane && (e.body.type === "proof.tests" || e.body.type === "proof.clip" || e.body.type === "proof.status"));
+  // One way to check a run: its badge, when it changed files and ran no test ("Done · unverified", CheckBadge), else Test it here.
+  // Check it is proof's offer: only where proof is on (the IDE's chats, once turned on, Arun 2026-11-25); a Captain's own check still
+  // shows its result here.
+  const checkable = isLocal() && latest && !active && !!item.ended && ctx.me.role !== "viewer" && !ctx.replaying && !!clipMode && clipMode !== "off";
+  // (In this edition a crew mate's reply is chatty, so a reply here that isn't chatty is never a teammate's result card.)
+  const badgeChecks = verdict?.tone === "none" && !!finalMsg && !chatty && checkable;
+  const clipable = isLocal() && latest && !active && !!item.ended && ended?.outcome === "done" && clipMode !== "off" && !!laneDiff?.files.length && !badgeChecks && !proven();
   const nextActions =
     changed.length > 0 || stillFailing.length > 0 || rewindIcon || (keepGoing && !handBar) || roomActs || againable || sendable || clipable ? (
       <>
@@ -4831,7 +5001,10 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       {chatty && active && stepsOpen && hasWork && <RunLine plain bare blocks={blocks} live {...(metaStart !== undefined ? { since: metaStart } : {})} took={took} waiting={waitsOnPerson(ctx.state, lane)} writing={typing === "answering"} />}
       {/* Done, a crew mate's reply is its words alone: no "Worked 26s · ran 2 commands" under them (Arun, 2026-11-17: "get rid of
           this tooo"). A coding session keeps its line, its record of the steps. */}
-      {hasWork && !chatty && (
+      {/* A reply that is only writing, with no step yet, has the same line from its first word: "Writing its answer · 6s", where it
+          showed its words and nothing live (spec 13, "Where it sits still" 2). The same line, in the same place, lists its steps once
+          it takes one. */}
+      {(hasWork || (active && !mate && typing === "answering" && !waitsOnPerson(ctx.state, lane))) && !chatty && (
         <RunLine
           blocks={blocks}
           live={active}
@@ -4852,8 +5025,8 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           should be something there instantly from the coding agent"). Its thinking, as it streams, takes this line's place. */}
       {active && !mate && !runLog && (!typing || typing === "waiting") && !waitsOnPerson(ctx.state, lane) && (
         <div className="rsp-live">
-          <Working label={blocks.length ? "Working" : "Thinking"} {...(since !== undefined ? { since } : {})} />
-          {forecast && <span className="rsp-live-fc">{forecast}</span>}
+          <Working label={item.carryOn ? (doingNow(ctx.events, lane)?.text ?? LIVE_WORDS.thinking) : blocks.length ? LIVE_WORDS.thinking : LIVE_WORDS.starting} {...(since !== undefined ? { since } : {})} />
+          {forecast && !item.carryOn && <span className="rsp-live-fc">{forecast}</span>}
         </div>
       )}
       {/* What its steps showed it (a screenshot it took, a picture it read), in the chat as well as in the step (Arun, 2026-11-18). */}
@@ -4864,10 +5037,20 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           we load the decision card in the chat too"). */}
       {active && ((q) => (q ? <div className="rsp-ask-inline" data-needs={lane} data-ask={q.seq}><ChatQuestion ctx={ctx} q={q} /></div> : null))(questionsTo(ctx.state, ctx.me.id).find((x) => x.lane === lane))}
       {typing && typing !== "waiting" && <LiveStream sid={ctx.sid} lane={lane} {...(!runLog && since !== undefined ? { since } : {})} />}
+      {/* "Done · unverified" is the way to check it, not a label (spec 13): Check it, Checking…, then how the tests went, Fix it. */}
       {verdict && finalMsg && !resulted && !chatty && (
-        <span className={`rsp-verdict ${verdict.tone}`} title={tests?.command ?? "No test command ran in this run"}>
-          <Icon name={verdict.tone === "pass" ? "check" : verdict.tone === "fail" ? "x" : "help"} size={12} /> {verdict.text}
-        </span>
+        <CheckBadge
+          verdict={verdict}
+          title={tests?.command}
+          sid={ctx.sid}
+          invite={ctx.invite}
+          lane={lane}
+          endSeq={endSeq}
+          events={ctx.events}
+          canCheck={checkable}
+          notify={ctx.notify}
+          onFix={latest && via && !ctx.replaying ? (text) => void ctx.send({ type: via, text, ...(lane !== MAIN_LANE ? { lane } : {}) }) : undefined}
+        />
       )}
       {/* No closing words yet (a turn under way, waiting on a card): what it drew, here. */}
       {!(finalMsg && finalMsg !== loginLine) && drawn}
@@ -5060,7 +5243,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
                 </li>
               ))}
             </ul>
-          ))(ctx.events.filter((e): e is SessionEvent & { body: { type: "repo.checked" } } => e.body.type === "repo.checked" && e.body.run === item.ended!.seq))}
+          ))(ofType(ctx.events, "repo.checked", ctx.sid).filter((e) => e.body.run === item.ended!.seq))}
       {/* What its answer claimed passes, held against its turn (claims.ts), said only when it isn't so: a claim it backed with what it
           ran says nothing (Arun, 2026-11-18: "get rid of this too", a "Checked:" line carrying its whole command). Friday's own run
           of the check is the line above. */}
@@ -5086,7 +5269,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
                 </span>
               )}
             </p>
-          ) : null)(ctx.events.findLast((e) => e.body.type === "claim.checked" && e.body.run === item.ended!.seq && (e.lane ?? MAIN_LANE) === lane))}
+          ) : null)(ofType(ctx.events, "claim.checked", ctx.sid).findLast((e) => e.body.run === item.ended!.seq && (e.lane ?? MAIN_LANE) === lane))}
       {item.ended && !didChange(item.diffs.at(-1)?.body.files) && item.asked.some((a) => a.answer !== "yes" && a.answer !== "no") && (
         <ul className="rsp-asked" aria-label="What it asked before running">
           {item.asked.filter((a) => a.answer !== "yes" && a.answer !== "no").map((a, i) => (
@@ -5106,7 +5289,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         msgs.some((m) => m.body.text.trim() || m.body.toolCalls.length) &&
         !ctx.state.options.work && // A Work session's changes are its outputs, in the rail: no diff to review (Arun, 2026-10-26: "get rid of this for work").
         (
-        <MateResult on={resulted} lane={lane} title={plainLine(item.ask?.text ?? "")} files={turnFiles} tests={tests} failing={stillFailing.length} branch={branchNow} sid={ctx.sid} page={finalMsg?.body.text.match(/https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?[^\s)>\]`'"]*/)?.[0]}>
+        <MateResult on={resulted} lane={lane} title={plainLine(item.ask?.text ?? "")} files={turnFiles} tests={tests} failing={stillFailing.length} branch={branchNow()} sid={ctx.sid} page={finalMsg?.body.text.match(/https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?[^\s)>\]`'"]*/)?.[0]}>
           {review}
         </MateResult>
       )}
@@ -5185,6 +5368,8 @@ const AGAIN = [
 const claimSaid = (k: string) => (k === "tests" ? "the tests pass" : k === "build" ? "the build passes" : k === "lint" ? "the linter passes" : "the types check");
 
 /** The branch a lane's run ended on, from the log (a folder switched or committed to a new branch, its tool attached): not the lane's now. */
+/** What branchAt reads, kept as the log grows (log-memo.ts ofTypes). */
+const BRANCH_EVENTS: ReadonlySet<string> = new Set(["folder.switched", "folder.committed", "engine.attached"]);
 function branchAt(events: readonly SessionEvent[], lane: string, seq: number): string | undefined {
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
@@ -6111,7 +6296,12 @@ export function DiffCard({
           </button>
         )}
       </div>}
-      {!shut && loading && <p className="diff-review-hint">Fetching the changes…</p>}
+      {/* Rows shaped like the file list it is fetching, filled in place, not a line of words (spec 13, "Where it sits still" 5). */}
+      {!shut && loading && (
+        <div className="diff-loading" role="status" aria-label="Fetching the changes">
+          <SkeletonRows rows={Math.max(1, Math.min(files.length || 3, 5))} />
+        </div>
+      )}
       {!shut && via && !compact && !(hideTitle && !panel) && <p className="diff-review-hint">Hover a line and press + to leave a note for the agent; shift-click another line for a block.</p>}
       {!shut && (() => {
         // Riskiest first, formatting-only folded at the end (reviewOrder): where a careful reader would start.
@@ -7521,6 +7711,17 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
         const latest = ctx.events.findLast((e) => e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane)?.seq === ev.seq;
         return <SignedOutNote ctx={ctx} lane={lane} latest={latest} />;
       }
+      // Cut by Friday restarting before the run said anything (so no reply of its own carries the note): the turn is put back and
+      // carries on once the runner is back, so it is said quietly, as a reply's own restart note is, never in red (spec 13).
+      if (b.outcome === "error" && RESTART_CUT.test(b.error ?? "")) {
+        const latest = ctx.events.findLast((e) => e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane)?.seq === ev.seq;
+        const name = agentNameFor(state, lane);
+        return (
+          <Notice ev={ev} icon={RotateCwIcon}>
+            {latest ? `Friday restarted here. ${name} carries on from where it was as soon as it's back.` : `Friday restarted here, and ${name} carried on below.`}
+          </Notice>
+        );
+      }
       return (
         <Notice ev={ev} icon={XIcon} tone="danger">
           {/* A tool's raw error (a stack trace) is said as what it means, the trace itself one click away (Arun, 2026-10-29:
@@ -8678,7 +8879,7 @@ export function DrivePill({ ctx, lane }: { ctx: Pick<Ctx, "state" | "me" | "send
   ];
 
   // How long you have had the wheel: a quiet nudge to pass it on, once it has been a while.
-  const took = ctx.events.findLast((e) => e.body.type === "control.granted" && e.body.to === me.id && (e.lane ?? MAIN_LANE) === lane);
+  const took = keptFold<SessionEvent | undefined>(`took:${ctx.state.id}:${me.id}:${lane}`, ctx.events, () => undefined, (was, e) => (e.body.type === "control.granted" && e.body.to === me.id && (e.lane ?? MAIN_LANE) === lane ? e : was));
   const mins = took ? Math.floor((Date.now() - took.ts) / 60_000) : 0;
   const text = mins >= 10 ? `You're driving · ${mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h ${mins % 60}m`}` : "You're driving";
   return <MenuButton className="drive-pill mine" label="You are driving this agent" text={text} items={items} above />;
@@ -9339,9 +9540,35 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   const crewStops = state.options.team && !locked && inView === ALL ? [MAIN_LANE, ...state.lanes.map((l) => l.id)].filter((id) => runOf(state, id).status === "running" && !waitsHere(id) && (driverOf(state, id)?.id === me.id || me.role === "owner")) : [];
   if (crewStops.length > 1) stopLanes = crewStops;
   const [stopAt, setStopAt] = useState<{ x: number; y: number } | null>(null);
+  /**
+   * The agents asked to stop and not stopped yet: Stop says "Stopping…" the moment it is pressed, not when the server's answer
+   * comes (spec 13; Arun, 2026-11-24: "Go all out and fix these problems"), until the run's pause or end arrives. Refused, it is
+   * Stop again, and says why.
+   */
+  const [stopping, setStopping] = useState<ReadonlySet<string>>(() => new Set());
+  const working = [MAIN_LANE, ...state.lanes.map((l) => l.id)].filter((id) => runOf(state, id).status === "running").join(" ");
+  useEffect(() => {
+    if (!stopping.size) return;
+    const still = new Set(working.split(" "));
+    const left = [...stopping].filter((l) => still.has(l));
+    if (left.length !== stopping.size) setStopping(new Set(left));
+  }, [working, stopping]);
   // The crew's faces and rows say it at once, not on their next read (Teammates.tsx refreshTeam).
-  const stopOf = (l: string) => void send({ type: "run.pause", ...(l !== MAIN_LANE ? { lane: l } : {}) }).then(() => void (state.options.team && ctx.identity && refreshTeam(ctx.identity)));
+  const stopOf = (l: string) => {
+    setStopping((was) => new Set(was).add(l));
+    // Quiet: a refusal is said here, by name, once (not also as the session's own toast).
+    void send({ type: "run.pause", ...(l !== MAIN_LANE ? { lane: l } : {}), quiet: true }).then((r) => {
+      if (!r.ok) {
+        setStopping((was) => new Set([...was].filter((x) => x !== l)));
+        notify(r.error ? `Couldn't stop ${agentNameFor(state, l)}: ${r.error}` : `Couldn't stop ${agentNameFor(state, l)}. Try again.`);
+        return;
+      }
+      if (state.options.team && ctx.identity) void refreshTeam(ctx.identity);
+    });
+  };
   const stopMode = stopLanes.length > 0 && !typed.trim();
+  /** Every agent this Stop stops is already stopping: it waits for them, rather than asking again. */
+  const allStopping = stopMode && stopLanes.every((l) => stopping.has(l));
   const stopName = stopLanes.length === 1 ? agentNameFor(state, stopLanes[0]!) : "the agents";
   // Paused: Resume is offered where Pause was. There was no way back but writing something or knowing the command menu.
   const paused = runOf(state, lane).status === "paused" && mayStop;
@@ -9452,7 +9679,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   const sendNow = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘↵" : "Ctrl ↵";
   // Only while sending would cut the step short: the standing "Waits for the current step" line was noise (Arun); the send
   // button's tooltip still says how to send now.
-  const liveHint = mode === "drive" && running && state.openQuestions[lane]?.to !== me.id && interrupt ? "Cuts the current step short" : "";
+  const liveHint = allStopping ? "Stopping…" : mode === "drive" && running && state.openQuestions[lane]?.to !== me.id && interrupt ? "Cuts the current step short" : "";
   // Friday Code on Solo is only Team's when it isn't running on somebody's own model.
   // An agent added on one of the person's own models runs on its lane's (model-lane.ts), whatever the session's is.
   const fridayHere = !state.engines[lane]?.tool && !isOwnModel(laneOwnModel(state, lane) ?? state.options.model);
@@ -9895,9 +10122,9 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                 type="file"
                 hidden
                 multiple
-                // @ts-expect-error -- not in the DOM types, understood by every browser.
-                webkitdirectory=""
-                directory=""
+                // Pick a folder: webkitdirectory is in @types/react from 19.3.3 and directory in none, so both go as plain attributes, which
+                // type-check on any version (a fresh public install took 19.3.3, where the old @ts-expect-error had nothing to expect).
+                {...FOLDER_PICK}
                 onChange={(e) => {
                   void uploadFolder(e.target.files);
                   e.target.value = "";
@@ -9982,9 +10209,10 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
             {stopMode ? (
               <PromptInputSubmit
                 type="button"
-                status="streaming"
-                aria-label={stopLanes.length > 1 ? "Stop the agents' tasks" : stopLanes[0] === lane ? "Stop the agent's task" : `Stop ${stopName}'s task`}
-                title={stopLanes.length > 1 ? "Stop every agent's task: each stays free for your next message" : `Stop ${stopName}'s task: it stays free for your next message, and anything queued goes next`}
+                status={allStopping ? "submitted" : "streaming"}
+                disabled={allStopping}
+                aria-label={allStopping ? "Stopping…" : stopLanes.length > 1 ? "Stop the agents' tasks" : stopLanes[0] === lane ? "Stop the agent's task" : `Stop ${stopName}'s task`}
+                title={allStopping ? `Stopping ${stopName}…` : stopLanes.length > 1 ? "Stop every agent's task: each stays free for your next message" : `Stop ${stopName}'s task: it stays free for your next message, and anything queued goes next`}
                 // The box keeps the keyboard: the Stop button turns into Send under the pointer, and the focus fell to the page's
                 // body with it (2026-10-29 verify).
                 onClick={(e) => {

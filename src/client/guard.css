@@ -1,0 +1,10 @@
+/* A piece that couldn't be drawn (guard.tsx): a feed row as one quiet line in meta ink, its two actions small beside it. */
+.guard-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 28px; padding: 2px 0; color: var(--ink-3); font-size: 12px; line-height: 16px; }
+.guard-line svg { color: var(--ink-3); }
+.guard-line-text { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.guard-line-acts { display: inline-flex; flex: none; align-items: center; gap: 2px; }
+.guard-line-acts .btn.small { height: 24px; padding: 0 8px; font-size: 12px; color: var(--ink-2); }
+.guard-line-acts .btn.small:hover:not(:disabled) { color: var(--ink); }
+
+/* A panel that couldn't be drawn (the preview, the terminal, a diff, the editor): the word in its place, centred in it. */
+.guard-panel { display: grid; place-items: center; width: 100%; height: 100%; min-height: 160px; overflow: auto; }

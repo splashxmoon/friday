@@ -9,7 +9,7 @@ import { brotliCompressSync, constants } from "node:zlib";
 import { build, type Metafile } from "esbuild";
 import { clientBuildOptions } from "../src/client-build.js";
 
-type Load = { kb: number; modules: string[] };
+type Load = { kb: number; modules: string[]; /** Its biggest modules as built, for a failure to say where to look. */ biggest: string };
 
 /**
  * Brotli KB and modules of app.js's eager closure (`first`), and of that with the session screen's chunk and its static imports
@@ -35,11 +35,16 @@ async function loads(edition: "hosted" | "local"): Promise<{ first: Load; sessio
       from.forEach(walk);
       let bytes = 0;
       const modules = new Set<string>();
+      const sizes = new Map<string, number>();
       for (const p of seen) {
         bytes += brotliCompressSync(files.get(p)!, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } }).length;
-        for (const m of Object.keys(outputs.get(p)!.inputs)) modules.add(m);
+        for (const [m, i] of Object.entries(outputs.get(p)!.inputs)) {
+          modules.add(m);
+          sizes.set(m, (sizes.get(m) ?? 0) + i.bytesInOutput);
+        }
       }
-      return { kb: bytes / 1024, modules: [...modules] };
+      const biggest = [...sizes].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([m, b]) => `${m} ${(b / 1024).toFixed(1)} KB`).join(", ");
+      return { kb: bytes / 1024, modules: [...modules], biggest };
     };
     const sessionChunk = [...outputs].find(([k, v]) => k.endsWith(".js") && v.entryPoint?.endsWith("client/SessionView.tsx"))?.[0];
     assert.ok(sessionChunk, "the session screen is a chunk of its own");
@@ -93,7 +98,16 @@ for (const edition of ["hosted", "local"] as const) {
     // drawn (Code.tsx lazy). 485.4 local, 483.3 hosted, 2026-11-20, from about 481 and 484.
     // To 489 for Friday IDE's wave 4, pings that wait while you type (ide/quiet.ts, quiet-queue.ts, the held toast in DoneToasts.tsx and
     // Attention.tsx's hold; the summary itself loads when one arrives: quiet-arrive.ts). 487.0 local, 2026-11-20.
-    assert.ok(kb < 489, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 489 KB budget`);
+    // To 491 for spec 13's live rows (Wave 3 E: the sidebar's one shared clock, a working row's step, Asks, a finished row's pull
+    // request, the thread list's live line, counts that move): 490.4 local, 2026-11-24, from 489.5 (already over 489 on w13-guard).
+    // To 493 for spec 13's polish: one wording for a working agent everywhere (step-words.ts liveWords in the sidebar's row) and a
+    // finished run summed up by its latest check (check-state.ts): 491.8 local, 491.1 hosted, 2026-11-24.
+    // Down to 445 once names were minified (b830e2fb, spec 13 Wave 2): 431.9 hosted, 432.9 local, 2026-11-24, from 489.5. Raise it
+    // only on purpose, saying why, as above. To 447 for Captains on the first screen (spec 14: the sidebar's folded Captains row, a
+    // project card's Captain band, Home's Captains card with its states, and the window they open): 445.2 local, 2026-11-25. The
+    // window and its settings could load when opened, a follow-up if this grows again.
+    const FIRST = 447;
+    assert.ok(kb < FIRST, `The first screen downloads ${kb.toFixed(1)} KB brotli of app.js and its static imports, ${(kb - FIRST).toFixed(1)} KB over its ${FIRST} KB budget: something now loads with the app that could wait. Load it lazily (lazy-answer.tsx, React.lazy) or say why above and raise the budget. Its biggest modules as built: ${first.biggest}.`);
     // A session link waits on the session screen too: CodeMirror (~150 KB packed) loads with the first file opened, not here
     // (mirror-editor.tsx). Nov 4 2026, merged with build/e2e-hardening: 890 KB hosted (1,048 KB before; Oct 22: 710 KB).
     assert.deepEqual(session.modules.filter((m) => /node_modules\/@codemirror\//.test(m)).slice(0, 3), [], "CodeMirror is in the session screen's first load: keep it in mirror-editor.tsx, loaded lazily");
@@ -120,6 +134,13 @@ for (const edition of ["hosted", "local"] as const) {
     // race's rows in Code (race-column.tsx loads when one is on screen). 1026.0 hosted, 1023.7 local, 2026-11-20.
     // To 1030 for the same wave 4 pings that wait while you type (1028.1 hosted, 2026-11-20).
     // To 1040 for proof clips, Test it and Today in the session's chat (1037.4 hosted, 2026-11-23, before v0.4.1).
-    assert.ok(session.kb < 1040, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 1040 KB budget`);
+    // To 1045 for spec 13's live session (Wave 3 E): "Done · unverified" as Check it with its states and Fix it (check-badge.tsx), a
+    // reply only writing on its run line, the changes' skeleton rows, the thread card's Stopping… (1043.5 hosted, 1040.5 local,
+    // 2026-11-24, from 1040.9 and 1038.2: already over 1040 on w13-guard).
+    // To 1047 for spec 13's polish: the same one wording and check summary, and the change card's and test proof's phone-width heads
+    // (1045.6 hosted, 1046.2 local, 2026-11-24).
+    // Down to 955 once names were minified (b830e2fb, spec 13 Wave 2): 937.4 hosted, 938.1 local, 2026-11-24, from 1043.5.
+    const SESSION = 955;
+    assert.ok(session.kb < SESSION, `A session link downloads ${session.kb.toFixed(1)} KB brotli before it can draw, ${(session.kb - SESSION).toFixed(1)} KB over its ${SESSION} KB budget: something now loads with the session screen that could wait for the card or panel that shows it. Its biggest modules as built: ${session.biggest}.`);
   });
 }

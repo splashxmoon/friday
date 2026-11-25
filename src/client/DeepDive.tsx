@@ -16,7 +16,7 @@ import type { Identity } from "./storage.js";
 import { ConfirmDialog, isTyping, relTime, type Confirmation } from "./ui.js";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, CircleAlertIcon } from "lucide-react";
 import { PageHeader } from "@/components/dass";
 import { EmptyState } from "@/components/dass/EmptyState";
 import "./deep-dive.css";
@@ -143,7 +143,7 @@ export function DeepDivePage({ identity }: { identity: Identity }) {
         {open ? (
           <Repo identity={identity} repo={open} onBack={() => (setOpen(null), void load())} />
         ) : (
-          <Repos identity={identity} dives={dives} error={error} onOpen={setOpen} onStarted={(key) => (setOpen(key), void load())} />
+          <Repos identity={identity} dives={dives} error={error} onRetry={load} onOpen={setOpen} onStarted={(key) => (setOpen(key), void load())} />
         )}
       </div>
     </div>
@@ -151,7 +151,8 @@ export function DeepDivePage({ identity }: { identity: Identity }) {
 }
 
 /** The repos explained so far, and the folders worked in lately that could be. */
-function Repos({ identity, dives, error, onOpen, onStarted }: { identity: Identity; dives: Dive[] | null; error: string; onOpen: (key: string) => void; onStarted: (key: string) => void }) {
+function Repos({ identity, dives, error, onRetry, onOpen, onStarted }: { identity: Identity; dives: Dive[] | null; error: string; /** Read the list again, after it couldn't be. */ onRetry: () => Promise<void>; onOpen: (key: string) => void; onStarted: (key: string) => void }) {
+  const [retrying, setRetrying] = useState(false);
   const [folders, setFolders] = useState<FolderInfo[] | null>(null);
   const [tools, setTools] = useState<ToolRow[] | null>(null);
   const [tool, setTool] = useState<EngineTool | "">(() => {
@@ -225,8 +226,31 @@ function Repos({ identity, dives, error, onOpen, onStarted }: { identity: Identi
           </DropdownMenu>
         )}
       </div>
-      {error && <p className="dd-error" role="alert">{error}</p>}
-      {dives === null ? (
+      {error && dives === null ? (
+        // Never read: why, and Try again, in the shelf's place.
+        <EmptyState
+          small
+          className="dd-failed"
+          tone="bad"
+          icon={<CircleAlertIcon />}
+          title="Couldn't read your Deep Dives"
+          action={
+            <Button variant="outline" size="sm" disabled={retrying} onClick={() => (setRetrying(true), void onRetry().finally(() => setRetrying(false)))}>
+              {retrying ? "Trying…" : "Try again"}
+            </Button>
+          }
+        >
+          <span role="alert">{error}</span>
+        </EmptyState>
+      ) : error ? (
+        <p className="dd-error" role="alert">
+          {error}{" "}
+          <button type="button" className="link-btn" disabled={retrying} onClick={() => (setRetrying(true), void onRetry().finally(() => setRetrying(false)))}>
+            Try again
+          </button>
+        </p>
+      ) : null}
+      {error && dives === null ? null : dives === null ? (
         <ul className="dd-shelf" aria-hidden="true">
           {[0, 1].map((i) => (
             <li key={i} className="dd-card dd-card-skel">
@@ -325,6 +349,11 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
     }
   }, [identity, q]);
   useEffect(() => void load(), [load]);
+  const [retrying, setRetrying] = useState(false);
+  const retry = () => {
+    setRetrying(true);
+    void load().finally(() => setRetrying(false));
+  };
   // Pages whose files changed since they were written (Arun, 2026-11-16, "Do 4"): asked once it is ready, and after a refresh.
   const [stale, setStale] = useState<Set<string>>(new Set());
   const ready = detail?.dive.status === "ready";
@@ -415,16 +444,55 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
   }, [sel]);
 
   if (error && !detail)
+    // Never read: why, and a way to ask again here, not only the way back (spec 13, "Where it sits still" 6).
     return (
       <div className="dd-repo">
-        <BackLink onBack={onBack} />
-        <p className="dd-error" role="alert">{error}</p>
+        <header className="dd-top">
+          <BackLink onBack={onBack} />
+        </header>
+        <EmptyState
+          className="dd-failed"
+          tone="bad"
+          icon={<CircleAlertIcon />}
+          title="Couldn't open this Deep Dive"
+          action={
+            <>
+              <Button variant="outline" size="sm" disabled={retrying} onClick={retry}>
+                {retrying ? "Trying…" : "Try again"}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onBack}>
+                All repos
+              </Button>
+            </>
+          }
+        >
+          <span role="alert">{error}</span>
+        </EmptyState>
       </div>
     );
   if (!detail)
+    // Opening: the repo's own page in grey, its header, the list of pages down the side and a page of words, so it fills in rather
+    // than appears (it was a spinner and "Loading…").
     return (
-      <div className="dd-loading">
-        <span className="dd-spin" aria-hidden="true" /> Loading…
+      <div className="dd-repo dd-repo-skel" role="status" aria-label="Opening the Deep Dive">
+        <header className="dd-top">
+          <BackLink onBack={onBack} />
+          <SkeletonLines n={1} className="dd-skel-name" />
+        </header>
+        <div className="dd-grid" aria-hidden="true">
+          <nav className="dd-side">
+            <SkeletonLines n={1} className="dd-skel-nav" />
+            <p className="dd-side-label">Pages</p>
+            <SkeletonLines n={7} className="dd-skel-nav" />
+          </nav>
+          <div className="dd-main">
+            <div className="dd-skel-page">
+              <SkeletonLines n={1} className="dd-skel-title" />
+              <SkeletonLines n={2} className="dd-skel-purpose" />
+              <SkeletonLines n={9} className="dd-skel-prose" />
+            </div>
+          </div>
+        </div>
       </div>
     );
   const { dive, pages, asks } = detail;
@@ -621,7 +689,8 @@ function MapView({ identity, repo, pages, onPage }: { identity: Identity; repo: 
   useEffect(() => {
     let gone = false;
     setError("");
-    api<{ graph: CodeGraph }>(identity, `/api/deepdive/map?key=${encodeURIComponent(repo)}`).then(
+    // Read on the repo's computer, which the server gives two minutes (app.ts): longer than a read's usual wait (api.ts).
+    api<{ graph: CodeGraph }>(identity, `/api/deepdive/map?key=${encodeURIComponent(repo)}`, { timeout: 150_000 }).then(
       (r) => !gone && setGraph(r.graph),
       (e: Error) => !gone && setError(e.message || "The map couldn't be read."),
     );

@@ -483,6 +483,21 @@ export class EngineHub {
    * middle of, and with nothing left to deliver that run was logged as done.
    */
   async reap(sid: string, recheck = true, reattach?: { lane: string; hostId: string }): Promise<void> {
+    // One at a time per session: Friday bringing back what it had as it starts, and a page opening the same session meanwhile,
+    // each read it still attached and each said it was gone, twice in the log.
+    const before = this.reaping.get(sid);
+    const p = (before ?? Promise.resolve()).catch(() => {}).then(() => this.reapNow(sid, recheck, reattach));
+    this.reaping.set(sid, p);
+    try {
+      await p;
+    } finally {
+      if (this.reaping.get(sid) === p) this.reaping.delete(sid);
+    }
+  }
+  /** Looks being taken now, by session (reap). */
+  private reaping = new Map<string, Promise<void>>();
+
+  private async reapNow(sid: string, recheck: boolean, reattach?: { lane: string; hostId: string }): Promise<void> {
     const state = await this.store.state(sid);
     let events: SessionEvent[] | null = null;
     for (const [lane, e] of Object.entries(state.engines)) {

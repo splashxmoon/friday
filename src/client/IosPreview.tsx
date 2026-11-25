@@ -1,5 +1,5 @@
 import { SmartphoneIcon } from "lucide-react";
-import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { EmptyState } from "@/components/dass/EmptyState";
 import type { IosBuild, IosInput, IosStatus } from "../runner/ios.js";
 import { uploadFile } from "./api.js";
@@ -56,6 +56,7 @@ export function IosPreview({
   sid,
   invite,
   send,
+  lead,
 }: {
   identity: Identity;
   cwd: string;
@@ -68,6 +69,8 @@ export function IosPreview({
   sid?: string | null;
   invite?: string;
   send?: Send;
+  /** The Web/iOS switch (Preview.tsx): first in the top row, the same place it sits on the web side. */
+  lead?: ReactNode;
 }) {
   const [status, setStatus] = useState<IosStatus | null>(null);
   const [err, setErr] = useState("");
@@ -321,16 +324,18 @@ export function IosPreview({
     }
   };
 
-  if (!status && !err) return <div className="preview-note"><p className="muted small"><span className="spinner tiny" /> Looking for Xcode…</p></div>;
+  // Before there's a bar to lead (still looking, no Xcode, no app), the switch gets a row of its own in the same place.
+  const withLead = (node: ReactNode) => (lead ? <><div className="ios-bar ios-bar-lead">{lead}</div>{node}</> : node);
+  if (!status && !err) return withLead(<div className="preview-note"><p className="muted small"><span className="spinner tiny" /> Looking for Xcode…</p></div>);
   if (status && !status.xcode)
-    return (
+    return withLead(
       <div className="preview-note ios-note">
         <p className="small">{status.error}</p>
         <button type="button" className="btn ghost small" onClick={() => void look()}>Check again</button>
       </div>
     );
   if (status && !status.simulators.length)
-    return (
+    return withLead(
       <div className="preview-note ios-note">
         <p className="small">{status.simError ?? "This Mac has no iOS simulator yet."}</p>
         <button type="button" className="btn ghost small" onClick={() => void look()}>Check again</button>
@@ -339,7 +344,7 @@ export function IosPreview({
   // Nothing to run: the panel's empty state, a drawing and a line, with no paragraph under it (Arun, 2026-11-05). It looks again
   // every few seconds, so an app made meanwhile shows without a button.
   if (status && !status.projects.length)
-    return (
+    return withLead(
       <div className="ios-empty">
         <EmptyState small icon={<SmartphoneIcon />} title="No iOS app in this folder" />
       </div>
@@ -350,6 +355,7 @@ export function IosPreview({
   return (
     <div className="ios-preview">
       <div className="ios-bar">
+        {lead}
         {/* The device as its name and iOS, the way Xcode shows it: a picker drawn as the label it is. */}
         <MenuButton
           className="ios-device-pick"

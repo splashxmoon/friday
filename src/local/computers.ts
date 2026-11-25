@@ -66,6 +66,8 @@ export class LocalLinks {
   onLinked: ((id: string) => void) | null = null;
   /** What it said of itself as it linked (app.ts keeps it with the pairing). */
   onHello: ((id: string, hello: ComputerHello) => void) | null = null;
+  /** One linked or gone: this computer's page is told, rather than asking every few seconds (app.ts, spec 13). */
+  onChange: (() => void) | null = null;
   /** Pages with a terminal open on one of these computers, by the page's own key: which computer, and how to tell it. */
   private termPages = new Map<string, { id: string; send: (m: unknown) => void; gone?: (why: string) => void }>();
   /** The Friday each computer runs, as it said when it linked (phone.ts /phone/hello): a call it can't answer says so. */
@@ -117,6 +119,7 @@ export class LocalLinks {
         console.log(`[computers] ${label} linked${address ? ` from ${address}` : ""}`);
         this.onHello?.(id, { host, platform, address });
         this.onLinked?.(id);
+        this.onChange?.();
         return;
       }
       if (!conn) return;
@@ -152,6 +155,7 @@ export class LocalLinks {
     const c = this.conns.get(id);
     if (!c) return;
     this.conns.delete(id);
+    this.onChange?.();
     for (const w of c.waits.values()) (clearTimeout(w.timer), w.reject(new Error(why)));
     c.waits.clear();
     // Its shells went with it: the pages showing them start again once it is back, rather than typing into nothing.

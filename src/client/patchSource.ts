@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, createElement, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DiffFile } from "../types.js";
 
 /**
@@ -6,6 +6,15 @@ import type { DiffFile } from "../types.js";
  * sets by name and counts only, and a file's text comes when its card is opened.
  */
 export const PatchSource = createContext<{ sid: string; invite: string } | null>(null);
+
+/**
+ * PatchSource for what is drawn outside the feed (the Changes panel, the file tree): since spec 13 the desktop app is sent every
+ * change set by name and counts, the latest too, so these fetch a file's text as they show it, as the feed's cards do.
+ */
+export function WithPatches({ sid, invite, children }: { sid: string; invite: string; children: ReactNode }) {
+  const value = useMemo(() => ({ sid, invite }), [sid, invite]);
+  return createElement(PatchSource.Provider, { value }, children);
+}
 
 /** Change sets already fetched, by session and seq: each is the same for good, so it is asked for once. */
 const fetched = new Map<string, Promise<DiffFile[]>>();

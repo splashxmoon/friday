@@ -1,6 +1,7 @@
 import { useContext, useEffect, useState } from "react";
 import type { ToolContext } from "../runner/context-report.js";
 import { PatchSource } from "./patchSource.js";
+import { useLogFold } from "./log-memo.js";
 import { ENGINE_MODEL_INFO, ENGINE_NAMES, ENGINE_TOOLS, MAIN_LANE, TOOL_INFO, type EngineTool, type SessionEvent } from "../types.js";
 import { clockUntil } from "../limit-reset.js";
 import type { AccountUsage, Limits } from "../runner/limits.js";
@@ -502,10 +503,12 @@ export function ContextGauge({ events, model = "", identity, tool, lane, solo = 
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   // undefined while it is being read, null when it couldn't be.
   const [ws, setWs] = useState<WorkspaceUsage | null | undefined>(undefined);
-  const used = events.findLast((e) => e.body.type === "agent.message" && (e.body.tokens ?? 0) > 0 && (!lane || (e.lane ?? MAIN_LANE) === lane))?.body;
+  // Carried on over each event as it comes, not looked for through the whole log again (log-memo.ts).
+  const used = useLogFold<SessionEvent | undefined>(events, () => undefined, (was, e) => (e.body.type === "agent.message" && (e.body.tokens ?? 0) > 0 && (!lane || (e.lane ?? MAIN_LANE) === lane) ? e : was), lane ?? "")?.body;
   const tokens = used && used.type === "agent.message" ? (used.tokens ?? 0) : 0;
   // A coding tool's context, as it said at the end of its last turn: its last model call's input against its model's window.
-  const toolUsage = tool ? events.findLast((e) => e.body.type === "agent.usage" && (e.body.context ?? 0) > 0 && (!lane || (e.lane ?? MAIN_LANE) === lane))?.body : undefined;
+  const lastUsage = useLogFold<SessionEvent | undefined>(events, () => undefined, (was, e) => (e.body.type === "agent.usage" && (e.body.context ?? 0) > 0 && (!lane || (e.lane ?? MAIN_LANE) === lane) ? e : was), lane ?? "");
+  const toolUsage = tool ? lastUsage?.body : undefined;
   const live = toolUsage?.type === "agent.usage" ? { used: toolUsage.context!, window: toolUsage.window || WINDOW } : null;
   // A coding tool's ring is its 5-hour limit, the one a working day runs into; never a weekly or monthly one. A tool that has no
   // 5-hour window (Cursor and Copilot sell monthly allowances) shows its context instead, and says so.

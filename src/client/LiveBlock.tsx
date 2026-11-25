@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CustomRendererProps } from "streamdown";
+import { Guard, GuardLine } from "./guard.js";
 import { Icon } from "./icons.js";
 import { Lightbox } from "./Lightbox.js";
 
@@ -48,6 +49,19 @@ const SIZER = `<script>(()=>{let last=0;const say=()=>{const b=document.body;con
  * scrolling zooms), double-click or the last button to put it back, and + / − on hover. The picture is moved with a transform,
  * so the frame keeps its height and nothing about it is lost. Found again when a diagram draws itself again.
  */
+/**
+ * A drawing in the theme it is shown in (Arun, 2026-11-25: "fix visuals colors too"): an agent's SVG names its own colours, often
+ * black text and grey lines for a white page, which vanish on the dark one. Once drawn, each shape's fill and stroke is read: text
+ * too close to the page's own shade takes the theme's text colour, a line or shape too close takes its muted one, and a backdrop
+ * the size of the drawing in the other theme's shade is cleared. A colour that already reads (a blue line, a red bar) stays.
+ */
+const svgContrast = (dark: boolean) =>
+  `<script>(()=>{const bg=${dark ? 0.02 : 0.9};const lum=c=>{const m=/rgba?\\(([^)]+)\\)/.exec(c||"");if(!m)return null;const [r,g,b,a=1]=m[1].split(",").map(Number);if(!(a>0.15))return null;const f=v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4)};return 0.2126*f(r)+0.7152*f(g)+0.0722*f(b)};const ratio=l=>(Math.max(l,bg)+0.05)/(Math.min(l,bg)+0.05);
+const fix=()=>{const svg=document.querySelector("body svg");if(!svg||svg.dataset.tuned)return;svg.dataset.tuned="1";const box=svg.getBoundingClientRect();
+for(const el of svg.querySelectorAll("*")){const t=el.tagName.toLowerCase();if(t==="defs"||el.closest("defs,mask,clipPath,pattern,marker"))continue;const cs=getComputedStyle(el);
+if(t==="rect"){const r=el.getBoundingClientRect();if(r.width>=box.width*0.9&&r.height>=box.height*0.9){const l=lum(cs.fill);if(l!=null&&ratio(l)>3)el.style.fill="transparent";continue}}
+const text=t==="text"||t==="tspan"||t==="textpath";if(text){const l=lum(cs.fill);if(l!=null&&ratio(l)<3)el.style.fill="var(--fg)";continue}const l=lum(cs.stroke);if(l!=null&&cs.strokeWidth!=="0px"&&ratio(l)<1.12)el.style.stroke="var(--muted)"}};
+addEventListener("load",fix);requestAnimationFrame(fix)})()</script>`;
 const panZoom = (big: boolean) =>
   `<style>.pz-tools{position:fixed;right:8px;bottom:8px;display:flex;gap:2px;padding:2px;border-radius:9px;background:var(--raised);border:1px solid var(--border);opacity:0;transition:opacity .15s}body:hover .pz-tools,.pz-tools:focus-within{opacity:1}.pz-tools button{width:26px;height:26px;padding:0;display:grid;place-items:center;border:0;background:transparent;border-radius:7px;font:600 14px/1 var(--font);color:var(--muted)}.pz-tools button:hover{background:var(--surface);color:var(--fg)}body.pz-on{cursor:grab;-webkit-user-select:none;user-select:none;touch-action:none;overflow:hidden!important}body.pz-drag{cursor:grabbing}</style><script>(()=>{const BIG=${big};let s=1,x=0,y=0,el=null,drag=null;` +
   `const apply=()=>{if(!el)return;document.body.dataset.pz=s!==1||x||y?"1":"";el.style.transformOrigin="0 0";el.style.transition=drag?"none":"transform .12s ease-out";el.style.transform="translate("+x+"px,"+y+"px) scale("+s+")"};` +
@@ -116,7 +130,7 @@ export function liveDocument(kind: LiveKind, code: string, dark: boolean, big = 
   // Opened large, a drawing or a diagram fills the space it is given, keeping its shape, and follows that space as it changes:
   // drawn at its own size it sat small in a corner of a window-sized frame.
   const fill = "html,body{height:100%}body{display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;overflow:hidden}";
-  if (kind === "svg") return `<!doctype html><html><head>${base}<style>${big ? `${fill}svg{width:100%!important;height:100%!important;max-width:none;max-height:none}` : "body{display:grid;place-items:center}svg{width:auto;height:auto;max-width:min(100%,760px);max-height:520px}"}</style></head><body>${code}${panZoom(big)}${SIZER}</body></html>`;
+  if (kind === "svg") return `<!doctype html><html><head>${base}<style>${big ? `${fill}svg{width:100%!important;height:100%!important;max-width:none;max-height:none}` : "body{display:grid;place-items:center}svg{width:auto;height:auto;max-width:min(100%,760px);max-height:520px}"}</style></head><body>${code}${svgContrast(dark)}${panZoom(big)}${SIZER}</body></html>`;
   if (kind === "mermaid") {
     // The source goes in as text, never as markup: a diagram is drawn from it, and nothing in it runs.
     const src = code.replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -326,7 +340,7 @@ function save(name: string, type: string, text: string) {
 }
 
 /** A fenced ```html, ```svg or ```mermaid block, drawn instead of printed (AnswerParts routes them here). */
-export function LiveBlock({ code, language, isIncomplete }: CustomRendererProps) {
+function LiveBlockDrawn({ code, language, isIncomplete }: CustomRendererProps) {
   const kind = (language.toLowerCase() === "svg" ? "svg" : language.toLowerCase() === "mermaid" ? "mermaid" : "html") as LiveKind;
   const [showCode, setShowCode] = useState(false);
   const [big, setBig] = useState(false);
@@ -483,5 +497,14 @@ export function LiveImage(props: React.ImgHTMLAttributes<HTMLImageElement> & { /
       {/* The picture as it was drawn here (a path in the folder, made the session's address above), not as the agent wrote it. */}
       {big && (rest.src || props.src) && <Lightbox src={(rest.src || props.src)!} alt={props.alt || (typeof props.src === "string" ? props.src : "")} onClose={() => setBig(false)} />}
     </>
+  );
+}
+
+/** A drawing that can't be drawn is one quiet line in the answer, the rest of the answer as it was (guard.tsx). */
+export function LiveBlock(props: CustomRendererProps) {
+  return (
+    <Guard where="live block" reset={props.code} fallback={(c) => <GuardLine caught={c} label="This drawing couldn't be shown" />}>
+      <LiveBlockDrawn {...props} />
+    </Guard>
   );
 }

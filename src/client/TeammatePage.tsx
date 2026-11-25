@@ -33,7 +33,7 @@ import { DecisionsPage } from "./DecisionsPage.js";
 import { MateRoutines } from "./MateRoutines.js";
 import { MateMemory } from "./MateMemory.js";
 import { Icon } from "./icons.js";
-import { MenuButton, Switch, useConfirm, type MenuItem } from "./ui.js";
+import { MenuButton, SkeletonLines, Switch, useConfirm, type MenuItem } from "./ui.js";
 import { base, Face, foldersOf, markOf, mateOn, mateStatus, MATE_CATS, modelLabel, mateThreads, MateRing, refreshTeam, setFolders, teamNow, TeammatePicker, short, TeammateFolderCard, TeammateForm, toolName, useTeamNow, workingSinceOf, type MateCat, type RoomView, type Team } from "./Teammates.js";
 
 import { setMateTab, useMateTab, type MateTab } from "./mate-tab.js";
@@ -844,12 +844,11 @@ const dayOf = (ts: number) => {
 
 const OUTCOME: Record<string, string> = { done: "Finished", waiting: "Needs you", error: "Stopped on an error", running: "Working", stopped: "Was stopped" };
 
+/** The app's own placeholder lines (ui.tsx), with the room this page's lists start with. */
 function Skeleton({ rows = 3 }: { rows?: number }) {
   return (
-    <div className="tm-skel" aria-hidden="true">
-      {Array.from({ length: rows }, (_, i) => (
-        <span key={i} style={{ width: `${86 - i * 14}%` }} />
-      ))}
+    <div className="px-1.5 py-3.5" aria-hidden="true">
+      <SkeletonLines lines={rows} />
     </div>
   );
 }

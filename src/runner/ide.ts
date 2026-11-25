@@ -20,6 +20,7 @@ import type {
   IdeWriteResult,
 } from "../ide-contract.js";
 import type { IdeHandlers } from "./ide-ops.js";
+import { writeAtomic } from "../safe-file.js";
 import { IDE_FOLDER_GONE, IDE_FOLDER_MISSING } from "../ide-contract.js";
 
 /**
@@ -313,47 +314,6 @@ async function read(p: { root: string; path: string }): Promise<IdeReadResult> {
     ...(utf8 === null ? { encoding: "latin1" as const } : {}),
     ...base,
   };
-}
-
-/** True for the errors a rename over a file in use gives on Windows (antivirus, a language server holding it open). */
-const isBusy = (e: unknown) => ["EPERM", "EBUSY", "EACCES"].includes((e as NodeJS.ErrnoException).code ?? "");
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Writes through a temp file in the same folder and renames it over the target, so a crash never leaves half a file. Keeps the
- * file's permissions. When the rename keeps failing because another program has the file open (Windows), the content is
- * written in place instead: less safe against a crash, but the save goes through.
- */
-async function writeAtomic(target: string, data: string | Buffer): Promise<void> {
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  let mode: number | undefined;
-  try {
-    mode = (await fs.stat(target)).mode & 0o7777;
-  } catch {
-    /* a new file */
-  }
-  const tmp = path.join(path.dirname(target), `.${path.basename(target)}.${randomBytes(4).toString("hex")}.tmp`);
-  try {
-    await fs.writeFile(tmp, data, mode === undefined ? undefined : { mode });
-    if (mode !== undefined) await fs.chmod(tmp, mode).catch(() => {});
-    for (let attempt = 0; ; attempt++) {
-      try {
-        await fs.rename(tmp, target);
-        return;
-      } catch (e) {
-        if (!isBusy(e)) throw e;
-        if (attempt >= 4) {
-          await fs.writeFile(target, data);
-          await fs.rm(tmp, { force: true }).catch(() => {});
-          return;
-        }
-        await sleep(40 * (attempt + 1));
-      }
-    }
-  } catch (e) {
-    await fs.rm(tmp, { force: true }).catch(() => {});
-    throw e;
-  }
 }
 
 function withEol(text: string, eol?: "lf" | "crlf"): string {

@@ -61,7 +61,7 @@ test("subagents still out are what it is doing, not \"Using Task\" or thinking (
   assert.equal(doingNow(read, "main")!.text, "Waiting on 2 subagents");
   // Its own step in flight is said as itself.
   assert.equal(doingNow([...two, step(3, [tc("r", "read_file", { path: "a.json" })])], "main")!.text, "Reading a.json");
-  assert.equal(doingNow([...one, result(3, "t1"), step(4, [], "")], "main")!.text, "Thinking");
+  assert.equal(doingNow([...one, result(3, "t1"), step(4, [], "")], "main")!.text, "Thinking about what to do next");
 });
 
 // A live line is a short status in words, never a tool's raw error (Arun, 2026-10-29: a teammate's needs-you line in the sidebar read

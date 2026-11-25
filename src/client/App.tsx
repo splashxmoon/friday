@@ -1,4 +1,5 @@
 import "./awake.js";
+import { MANAGER_STARTED } from "./manager-events.js";
 import { PageTabs } from "@/components/dass/page-bits";
 import { leaving, leavingByHistory } from "./leave-guard.js";
 import { AgentImport } from "./AgentImport.js";
@@ -99,15 +100,18 @@ import { PrWatch, usePrs } from "./prWatch.js";
 import {
   loadLayout,
   loadProjects,
+  loadForgetting,
   loadRecents,
   saveLayout,
   saveProjects,
+  saveForgetting,
   saveRecents,
   type Identity,
   type Layout,
   type Project,
   type RecentSession,
 } from "./storage.js";
+import type { RepoUse } from "./storage.js";
 import { inBand, isTyping, onBand, PageSkeleton, SessionSkeleton, useConfirm, useDismiss, type MenuItem } from "./ui.js";
 import { WaitingOnYou, askToNotify, useAttention } from "./Attention.js";
 import { DailyBriefHost } from "./DailyBrief.js";
@@ -284,7 +288,7 @@ export function App() {
     return () => removeEventListener("storage", heard);
   }, []);
   // Sessions you are in on the server that this browser has never opened: another machine's, or one a schedule started.
-  type Mine = { sessions: { sid: string; title: string; role: Role; invite: string; at: number; later?: boolean; code?: boolean }[] };
+  type Mine = { sessions: { sid: string; title: string; role: Role; invite: string; at: number; later?: boolean; code?: boolean; repos?: RepoUse[] }[] };
   // Which sessions are Code's chats, told to the server whenever Code's list changes, so the phone (and any other device) can keep
   // them out of its sessions as this window does (app.ts /api/sessions/code-chats; Arun, 2026-11-21: "ensure we arent showing IDE
   // session chats"). Only when the list differs from the last one sent.
@@ -302,6 +306,17 @@ export function App() {
     const off = onCodeChatsChange(() => (clearTimeout(timer), (timer = setTimeout(tell, 800))));
     return () => (off(), clearTimeout(timer));
   }, [authed, identity.id]);
+  /** The last read of your sessions failed: read again when the window comes back (the effect after this). */
+  const mineStale = useRef(false);
+  const mineRetry = useRef(0);
+  /** Sessions being deleted right now: off the list already, not brought back by a read of the server's in the meantime. */
+  const deleting = useRef(new Set<string>());
+  /** Take a session off the server's list of yours, and stop asking once it has (storage.ts loadForgetting). */
+  const forget = (sid: string) =>
+    api(identity, "/api/sessions/mine/forget", { method: "POST", body: JSON.stringify({ sid }) }).then(
+      () => saveForgetting(loadForgetting().filter((x) => x !== sid)),
+      () => {},
+    );
   const reloadMine = useCallback(
     (first = false) =>
       // The page asked already, while the app loaded; if that came back empty-handed (it asked before knowing who you were), ask again.
@@ -309,16 +324,20 @@ export function App() {
         .then((r) => r ?? api<Mine>(identity, "/api/sessions/mine"))
         .then((r) =>
           setRecents((prev) => {
-            const known = new Set(prev.map((x) => x.sid));
-            const add = r.sessions.filter((s) => !known.has(s.sid) && !isCodeChat(s.sid) && !s.code && !s.later).map((s) => ({ sid: s.sid, title: s.title, invite: s.invite, role: s.role, openedAt: s.at }));
+            // Taken off the list here and not yet gone from the server's: not brought back by it (removeRecent, deleteSession).
+            const known = new Set([...prev.map((x) => x.sid), ...loadForgetting(), ...deleting.current]);
+            const add = r.sessions.filter((s) => !known.has(s.sid) && !isCodeChat(s.sid) && !s.code && !s.later).map((s) => ({ sid: s.sid, title: s.title, invite: s.invite, role: s.role, openedAt: s.at, ...(s.repos?.length ? { repos: s.repos } : {}) }));
             // A session renamed somewhere else (a teammate, another computer) takes its new title here too, over a sidebar name.
             const title = new Map(r.sessions.map((s) => [s.sid, s.title]));
             let renamed = false;
+            // One listed before its agents had a folder takes it now, so it moves from Recent into its project (session-repos.ts).
+            const reposBy = new Map(r.sessions.flatMap((s) => (s.repos?.length ? [[s.sid, s.repos] as const] : [])));
             const kept = prev.map((x) => {
               const t = title.get(x.sid);
-              if (!t || t === x.title) return x;
+              const repos = !x.repos?.length ? reposBy.get(x.sid) : undefined;
+              if ((!t || t === x.title) && !repos) return x;
               renamed = true;
-              return { ...x, title: t, alias: undefined };
+              return { ...x, ...(t && t !== x.title ? { title: t, alias: undefined } : {}), ...(repos ? { repos } : {}) };
             });
             if (!add.length && !renamed) return prev;
             const next = add.length ? [...kept, ...add].sort((a, b) => b.openedAt - a.openedAt) : kept;
@@ -326,12 +345,49 @@ export function App() {
             return next;
           }),
         )
-        .catch(() => {}),
+        .then(
+          () => void (mineStale.current = false),
+          // Not read (the server restarting, the network gone a moment): the list isn't left as it was for the rest of the day.
+          // It is asked again shortly, and as the window comes back to the front or online (the effect below).
+          () => {
+            mineStale.current = true;
+            clearTimeout(mineRetry.current);
+            mineRetry.current = window.setTimeout(() => void reloadMine(), 5000);
+          },
+        ),
     [identity.id], // eslint-disable-line react-hooks/exhaustive-deps
   );
   useEffect(() => {
     if (!authed || !identity.id) return;
     void reloadMine(true);
+  }, [authed, identity.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A project Manager started a thread (Managers.tsx): into the list now, not at the next reload.
+  useEffect(() => {
+    if (!authed || !identity.id) return;
+    const again = () => void reloadMine();
+    addEventListener(MANAGER_STARTED, again);
+    return () => removeEventListener(MANAGER_STARTED, again);
+  }, [authed, identity.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!authed || !identity.id) return;
+    const again = () => void (mineStale.current && document.visibilityState === "visible" && reloadMine());
+    addEventListener("focus", again);
+    addEventListener("online", again);
+    document.addEventListener("visibilitychange", again);
+    return () => {
+      clearTimeout(mineRetry.current);
+      removeEventListener("focus", again);
+      removeEventListener("online", again);
+      document.removeEventListener("visibilitychange", again);
+    };
+  }, [authed, identity.id, reloadMine]);
+  // Removals the server hasn't taken yet (removeRecent): asked again as the app opens and as it comes back online.
+  useEffect(() => {
+    if (!authed || !identity.id) return;
+    const retry = () => loadForgetting().forEach((sid) => void forget(sid));
+    retry();
+    addEventListener("online", retry);
+    return () => removeEventListener("online", retry);
   }, [authed, identity.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // In the Mac app the window's toolbar has the button that folds the chat list, so the Chat button only goes to chats.
   const [mac, setMac] = useState(false);
@@ -1217,7 +1273,10 @@ export function App() {
       const code = loadCodeChats().find((c) => c.sid === d.sid && (!c.linked || getMode() === "code"));
       if (code) return void (showCodeChat(code.folder, code.sid), setIdeRoot(code.folder), setViewMode("code"));
       const r = loadRecents().find((x) => x.sid === d.sid) ?? (d.invite ? { sid: d.sid, invite: d.invite } : null);
-      if (r) navigate({ kind: "session", sid: r.sid, invite: r.invite });
+      if (!r) return;
+      // From outside the window (Slack's Open in Friday, the menu bar): shown in Agents, which Code's column would otherwise hide.
+      if (isLocal() && getMode() === "code") setViewMode("agents");
+      navigate({ kind: "session", sid: r.sid, invite: r.invite });
     };
     window.addEventListener("friday:open-session", on);
     // Something waiting on you that isn't a session of the list (Home's row for a workflow at its Your OK): where it is answered.
@@ -1267,20 +1326,45 @@ export function App() {
   }, [attention.gone]);
   const removeRecent = (sid: string) => {
     dropRecents([sid]);
-    // The server's list too, or it comes back the next time the app opens.
-    void api(identity, "/api/sessions/mine/forget", { method: "POST", body: JSON.stringify({ sid }) }).catch(() => {});
+    // The server's list too, or it comes back the next time the app opens: kept as still to do until the server has it, and
+    // asked again as the app opens if this one doesn't land (storage.ts loadForgetting).
+    saveForgetting([...loadForgetting(), sid]);
+    void forget(sid);
     // A chat that is gone can't stay on screen: back to the page for starting a new one.
     if (route.kind === "session" && route.sid === sid) navigate({ kind: "home" });
   };
-  // Deleted for everyone: the server frees what it kept, and it leaves every list, here and on everyone else's devices.
+  /**
+   * Deleted for everyone: the server frees what it kept, and it leaves every list, here and on everyone else's devices. Off the
+   * list at once, as a rename is (Sidebar.tsx renameSession), not after the server's answer (spec 13; Arun, 2026-11-24: "Go all
+   * out and fix these problems"); refused, the row comes back where it was, and the words returned say why (shown by the caller).
+   */
   const deleteSession = async (sid: string): Promise<string | void> => {
+    const at = recents.findIndex((x) => x.sid === sid);
+    const row = recents[at];
+    deleting.current.add(sid);
+    setRecents((prev) => {
+      const next = prev.filter((x) => x.sid !== sid);
+      if (next.length === prev.length) return prev;
+      saveRecents(next);
+      return next;
+    });
+    if (route.kind === "session" && route.sid === sid) navigate({ kind: "home" });
     try {
       await api(identity, `/api/sessions/${encodeURIComponent(sid)}/delete`, { method: "POST", body: "{}" });
     } catch (e) {
-      return (e as Error).message || "Couldn't delete that session.";
+      deleting.current.delete(sid);
+      if (row)
+        setRecents((prev) => {
+          if (prev.some((x) => x.sid === sid)) return prev;
+          const next = [...prev.slice(0, at), row, ...prev.slice(at)];
+          saveRecents(next);
+          return next;
+        });
+      const why = (e as Error).message || "Try again in a moment.";
+      return `Couldn't delete ${row?.alias || row?.title ? `“${row.alias || row.title}”` : "that session"}. ${why}`;
     }
+    deleting.current.delete(sid);
     dropRecents([sid]);
-    if (route.kind === "session" && route.sid === sid) navigate({ kind: "home" });
   };
   const writeProjects = (fn: (p: Project[]) => Project[]) =>
     setProjects((prev) => {

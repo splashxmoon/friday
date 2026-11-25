@@ -2,6 +2,7 @@ import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir,
 import { homedir } from "node:os";
 import path from "node:path";
 import type { EngineTool } from "../types.js";
+import { NO_WRITE, objectShape, readJson, updateJson } from "../safe-file.js";
 
 /**
  * More than one account for a coding tool on one computer (Arun, 2026-10-24: "add support for multiple account support for the
@@ -103,17 +104,13 @@ async function sharedNames(tool: AccountTool, home: string): Promise<string[]> {
   return [...new Set([...spec.always, ...there.filter((n) => !spec.private.has(n) && !claudeKeeps(n))])];
 }
 
-async function readStore(): Promise<Store> {
-  try {
-    const j = JSON.parse(await readFile(storeFile(), "utf8")) as Store;
-    return j && typeof j === "object" ? j : {};
-  } catch {
-    return {};
-  }
+/** For reading. A change goes through updateStore: one unreadable is set aside first, never written over as empty (safe-file.ts). */
+function readStore(): Promise<Store> {
+  return readJson(storeFile(), (v) => objectShape<Store>(v), () => ({}));
 }
-async function writeStore(s: Store): Promise<void> {
-  await mkdir(stateDir(), { recursive: true });
-  await writeFile(storeFile(), JSON.stringify(s, null, 2));
+/** The store read afresh, changed in place by `change` (NO_WRITE to leave it) and written whole, one change at a time. */
+function updateStore<R>(change: (s: Store) => R | Promise<R>): Promise<R> {
+  return updateJson(storeFile(), { shape: (v) => objectShape<Store>(v), empty: (): Store => ({}) }, change);
 }
 
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -277,29 +274,29 @@ async function realTarget(p: string): Promise<string> {
 export async function addAccount(tool: AccountTool, label: string): Promise<ToolAccount> {
   const name = label.trim().slice(0, 40);
   if (!name) throw new Error("Give the account a name, like Work or Personal.");
-  const s = await readStore();
-  const list = (s[tool] ??= []);
-  const taken = new Set([DEFAULT_ACCOUNT, ...list.map((a) => a.id)]);
-  let id = slug(name);
-  for (let n = 2; taken.has(id); n++) id = `${slug(name).slice(0, 28)}-${n}`;
-  const account: ToolAccount = { id, label: name };
-  list.push(account);
-  await prepareAccountDir(tool, id);
-  await writeStore(s);
-  return account;
+  return updateStore(async (s) => {
+    const list = (s[tool] ??= []);
+    const taken = new Set([DEFAULT_ACCOUNT, ...list.map((a) => a.id)]);
+    let id = slug(name);
+    for (let n = 2; taken.has(id); n++) id = `${slug(name).slice(0, 28)}-${n}`;
+    const account: ToolAccount = { id, label: name };
+    list.push(account);
+    await prepareAccountDir(tool, id);
+    return account;
+  });
 }
 
 /** Renamed, the default too. */
 export async function renameAccount(tool: AccountTool, id: string, label: string): Promise<void> {
   const name = label.trim().slice(0, 40);
   if (!name) throw new Error("Give the account a name.");
-  const s = await readStore();
-  const list = (s[tool] ??= []);
-  const a = list.find((x) => x.id === id);
-  if (a) a.label = name;
-  else if (id === DEFAULT_ACCOUNT) list.unshift({ id, label: name });
-  else throw new Error("There's no such account.");
-  await writeStore(s);
+  await updateStore((s) => {
+    const list = (s[tool] ??= []);
+    const a = list.find((x) => x.id === id);
+    if (a) a.label = name;
+    else if (id === DEFAULT_ACCOUNT) list.unshift({ id, label: name });
+    else throw new Error("There's no such account.");
+  });
 }
 
 /**
@@ -308,35 +305,36 @@ export async function renameAccount(tool: AccountTool, id: string, label: string
  */
 export async function removeAccount(tool: AccountTool, id: string): Promise<void> {
   if (id === DEFAULT_ACCOUNT) throw new Error("That's the tool's own sign-in. Sign out of it instead.");
-  const s = await readStore();
-  s[tool] = (s[tool] ?? []).filter((a) => a.id !== id);
-  await writeStore(s);
+  await updateStore((s) => void (s[tool] = (s[tool] ?? []).filter((a) => a.id !== id)));
   if (ID.test(id)) await rm(accountDir(tool, id), { recursive: true, force: true });
 }
 
 /** Ran out of usage, until `until` when its message said. */
 export async function markOut(tool: AccountTool, id: string, until: number | null, now = Date.now()): Promise<void> {
-  const s = await readStore();
-  const list = (s[tool] ??= []);
-  let a = list.find((x) => x.id === id);
-  if (!a) {
-    if (id !== DEFAULT_ACCOUNT) return;
-    a = { id, label: "Main" };
-    list.unshift(a);
-  }
-  a.outUntil = until;
-  a.outAt = now;
-  await writeStore(s);
+  await updateStore((s) => {
+    const list = (s[tool] ??= []);
+    let a = list.find((x) => x.id === id);
+    if (!a) {
+      if (id !== DEFAULT_ACCOUNT) return NO_WRITE;
+      a = { id, label: "Main" };
+      list.unshift(a);
+    }
+    a.outUntil = until;
+    a.outAt = now;
+  });
 }
 
 /** Not out any more: a run went through on it. Nothing written when it wasn't marked. */
 export async function markBack(tool: AccountTool, id: string): Promise<void> {
-  const s = await readStore();
-  const a = (s[tool] ?? []).find((x) => x.id === id);
-  if (!a || (a.outAt === undefined && a.outUntil === undefined)) return;
-  delete a.outAt;
-  delete a.outUntil;
-  await writeStore(s);
+  // Read first without the lock: the run that went through on an account not marked out (nearly every run) writes nothing.
+  const had = ((await readStore())[tool] ?? []).find((x) => x.id === id);
+  if (!had || (had.outAt === undefined && had.outUntil === undefined)) return;
+  await updateStore((s) => {
+    const a = (s[tool] ?? []).find((x) => x.id === id);
+    if (!a || (a.outAt === undefined && a.outUntil === undefined)) return NO_WRITE;
+    delete a.outAt;
+    delete a.outUntil;
+  });
 }
 
 /** Out of usage now: until the time it said, or for five hours from when it said no time. */

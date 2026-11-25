@@ -20,10 +20,10 @@ export interface SelfRun {
 }
 
 /** Nudges in a row that got the room nowhere (nothing changed, no task moved) before it stops by itself. */
-export const STALL_NUDGES = 3;
+export const STALL_NUDGES = 2;
 /** How long the room is quiet before the lead is nudged, and the least time between two nudges. */
 export const QUIET_MS = 45_000;
-export const NUDGE_GAP_MS = 3 * 60_000;
+export const NUDGE_GAP_MS = 5 * 60_000;
 
 /** What leads every turn in the room while it runs on its own: short, and the rules that matter. */
 export function selfRunNote(goal: string, lead: boolean): string {

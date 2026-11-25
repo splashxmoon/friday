@@ -20,9 +20,23 @@ export interface PushConfig {
   topic: string;
 }
 
+/**
+ * The .p8 file's text as OpenSSL reads it, however it was pasted: with its line breaks, with them written as \\n, or with them lost
+ * to spaces or run together by a one-line field (2026-11-24: Render's field kept the key on one line and every push failed with
+ * "DECODER routines::unsupported"). The base64 between the BEGIN and END lines is rewrapped at 64 characters.
+ */
+export function pemOf(raw?: string): string | undefined {
+  const text = raw?.replace(/\\n/g, "\n").trim();
+  if (!text) return undefined;
+  const m = /-----BEGIN ([A-Z ]+)-----([\s\S]*?)-----END \1-----/.exec(text);
+  if (!m) return text;
+  const body = m[2]!.replace(/\s+/g, "");
+  return `-----BEGIN ${m[1]}-----\n${body.match(/.{1,64}/g)!.join("\n")}\n-----END ${m[1]}-----`;
+}
+
 /** Off until the Apple key is set: APNS_KEY (the .p8 file's text), APNS_KEY_ID, APNS_TEAM_ID, and APNS_TOPIC (the app's bundle id). */
 export function pushConfigFromEnv(env: NodeJS.ProcessEnv): PushConfig | null {
-  const key = env.APNS_KEY?.replace(/\\n/g, "\n").trim();
+  const key = pemOf(env.APNS_KEY);
   const keyId = env.APNS_KEY_ID?.trim();
   const teamId = env.APNS_TEAM_ID?.trim();
   const topic = env.APNS_TOPIC?.trim() || "com.tryfridaywork.friday";
@@ -100,7 +114,14 @@ export class PushRelay {
     const phone = createHash("sha256").update(d.token).digest("hex").slice(0, 24);
     if ((await this.count(`phone:${phone}:${hour}`)) > PER_PHONE || (await this.count(`from:${from.slice(0, 64)}:${hour}`)) > PER_SENDER) return 429;
     const payload = sealedPayload(sealed, level, thread);
-    let status = await this.sendOne(this.config, d, this.jwt(), payload).catch(() => 0);
+    let jwt: string;
+    try {
+      jwt = this.jwt();
+    } catch (e) {
+      console.error(`[push] APNS_KEY can't be read as a .p8 key (${(e as Error).message}): paste the file's whole text`);
+      return 503;
+    }
+    let status = await this.sendOne(this.config, d, jwt, payload).catch(() => 0);
     // A build installed from Xcode is signed for development whatever its configuration, so its token is the sandbox's: Apple says
     // 400 to it in production. Tried once in the other place.
     if (status === 400) {

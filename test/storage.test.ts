@@ -13,7 +13,7 @@ const home = mkdtempSync(path.join(tmpdir(), "friday-storage-"));
 process.env.HOME = home;
 process.env.FRIDAY_HOME = path.join(home, ".friday");
 process.env.FRIDAY_WORKTREES = path.join(home, ".friday", "worktrees");
-const { measure, retireCopy, retireOlder, shotSid, tidy } = await import("../src/runner/storage.js");
+const { claudeKey, measure, retireCopy, retireOlder, shotSid, tidy } = await import("../src/runner/storage.js");
 const { addWorktree, markMadeHere } = await import("../src/runner/git.js");
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd, encoding: "utf8" }).trim();
@@ -131,4 +131,67 @@ test("tidy: left-behind copies cleared or trashed, kept ones stay, leftovers and
   await tidy({ inUse: new Set(), referenced: null, liveSids: null, since: 0, graceMs: 0 });
   assert.equal(existsSync(spare), true);
   assert.equal(await retireCopy(spare), "dropped");
+});
+
+// Arun, 2026-11-24: "friday eats up storage with all of the work trees and past sessions that were deleted". Copies agents make in
+// the worktrees folder by a name of their own were never measured or cleared, and Claude Code's records of copies that are gone
+// stayed in ~/.claude/projects.
+test("tidy: copies agents named themselves count, and conversations of gone copies go to the trash", async (t) => {
+  delete process.env.CLAUDE_CONFIG_DIR;
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const repo = path.join(home, "code", "edge");
+  mkdirSync(repo, { recursive: true });
+  writeFileSync(path.join(repo, "a.txt"), "a\n");
+  git(repo, "init", "-q", "-b", "main");
+  git(repo, "add", ".");
+  git(repo, "commit", "-qm", "init");
+  const root = process.env.FRIDAY_WORKTREES!;
+  mkdirSync(root, { recursive: true });
+  // An agent's own `git worktree add`, under a name Friday didn't give it, untouched for four days; and a plain folder, not a copy.
+  const named = path.join(root, "edge-c2-adapt");
+  git(repo, "worktree", "add", "-q", "-b", "friday/c2-adapt", named);
+  const days4 = (Date.now() - 4 * 86_400_000) / 1000;
+  const g = git(named, "rev-parse", "--absolute-git-dir");
+  for (const p of [named, path.join(g, "HEAD"), path.join(g, "logs", "HEAD")]) if (existsSync(p)) utimesSync(p, days4, days4);
+  mkdirSync(path.join(root, "notes"), { recursive: true });
+  const live = (await addWorktree(repo, "live")).path;
+
+  // Claude Code's records: of the live copy and a folder in it (kept), of a copy gone two days (goes), of one gone an hour (waits
+  // its day), and of someone's own repository (never touched).
+  const projects = path.join(home, ".claude", "projects");
+  const rec = (folder: string, ageDays: number) => {
+    const at = path.join(projects, claudeKey(folder));
+    mkdirSync(at, { recursive: true });
+    writeFileSync(path.join(at, "s.jsonl"), "{}\n");
+    const when = (Date.now() - ageDays * 86_400_000) / 1000;
+    utimesSync(path.join(at, "s.jsonl"), when, when);
+    utimesSync(at, when, when);
+    return at;
+  };
+  const keepLive = rec(live, 5);
+  const keepInside = rec(path.join(live, "app"), 5);
+  const gone = rec(path.join(root, "edge-0badc0de"), 2);
+  const fresh = rec(path.join(root, "edge-1badc0de"), 1 / 24);
+  const own = rec(repo, 30);
+
+  const m = await measure(new Set([live]), new Set());
+  const of = (id: string) => m.piles.find((p) => p.id === id)!;
+  assert.equal(of("older").count, 1, "the agent's own copy is measured, as an older copy");
+  assert.equal(of("transcripts").count, 1, "the record of the copy gone two days");
+  assert.ok(m.due >= of("transcripts").bytes && of("transcripts").bytes > 0);
+
+  await tidy({ inUse: new Set(), referenced: new Set([live]), liveSids: null, since: 0 });
+  assert.equal(existsSync(named), true, "an unmarked copy is never put away by itself");
+  assert.equal(existsSync(gone), false, "the record of a gone copy leaves ~/.claude…");
+  const trashed = readdirSync(path.join(home, ".friday", "trash", "transcripts"));
+  assert.equal(trashed.length, 1);
+  assert.ok(trashed[0]!.startsWith(path.basename(gone) + "-"), "…for Friday's trash, its week from now");
+  assert.equal(existsSync(path.join(home, ".friday", "trash", "transcripts", trashed[0]!, "s.jsonl")), true);
+  for (const p of [keepLive, keepInside, fresh, own]) assert.equal(existsSync(p), true, p);
+
+  // Asked to, the agent's copy goes to the trash (Friday deletes outright only the copies it named, git.ts ownTop); its branch stays.
+  assert.deepEqual(await retireOlder(new Set([live]), new Set()), { dropped: 0, trashed: 1 });
+  assert.equal(existsSync(named), false);
+  assert.equal(git(repo, "rev-parse", "--verify", "-q", "friday/c2-adapt").length > 0, true, "its branch stays");
+  assert.equal(existsSync(path.join(root, "notes")), true, "a folder that isn't a copy is never touched");
 });

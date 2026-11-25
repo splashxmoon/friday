@@ -35,6 +35,11 @@ export interface ReviewPlan {
  * The run to review in this lane, if there is one: the latest, if it finished, changed files, and has not been reviewed.
  * A run that was the agent fixing the reviewer's findings is round two; nothing past that is reviewed.
  */
+/** A change smaller than this, in lines added and taken out, isn't reviewed a second time. */
+export const SMALL_LINES = 10;
+/** Files that are docs or tests: a change to only these isn't reviewed a second time. */
+const DOCS_OR_TESTS = /\.(md|mdx|txt|rst|adoc)$|(^|\/)(docs?|tests?|__tests__|e2e|spec)\/|\.(test|spec)\.[\w]+$/i;
+
 export function reviewPlan(events: SessionEvent[], lane: string): ReviewPlan | null {
   const mine = events.filter((e) => (e.lane ?? MAIN_LANE) === lane);
   const endAt = mine.findLastIndex((e) => e.body.type === "run.ended");
@@ -56,6 +61,11 @@ export function reviewPlan(events: SessionEvent[], lane: string): ReviewPlan | n
     const earlier = events.filter((e) => e.body.type === "review.done" && (e.lane ?? MAIN_LANE) === lane && e.seq < (asked?.seq ?? 0));
     if (earlier.at(-1)?.body.type === "review.done" && (earlier.at(-1)!.body as { round: number }).round >= 2) return null;
   }
+  // A small change, or one only to docs or tests, isn't worth a second model reading it (Arun, 2026-11-25: "optimized for cost while
+  // maintaining performance"): under SMALL_LINES lines changed in all, or every file docs or tests. A fix's own review still runs.
+  const lines = files.reduce((n, f) => n + f.additions + f.deletions, 0);
+  const docsOrTests = files.every((f) => DOCS_OR_TESTS.test(f.path));
+  if (round === 1 && (lines < SMALL_LINES || docsOrTests)) return null;
   const human = before.findLast((e) => e.body.type === "instruction" && e.actor.kind === "human" && !e.body.text.startsWith("[session]"));
   const ask = human?.body.type === "instruction" ? human.body.text : "";
   const spokeSince = events.some((e) => e.seq > end.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "instruction" && e.actor.kind === "human");

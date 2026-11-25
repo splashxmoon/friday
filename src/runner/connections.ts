@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { AcpMcpServer } from "./mcp-servers.js";
 import { builtInApp, providerOf } from "./builtin-apps.js";
+import { NO_WRITE, readJson, updateJson } from "../safe-file.js";
 
 /**
  * MCP servers set up once on this computer and handed to every coding tool Friday runs here (Arun, 2026-11-17: "Yes, build it",
@@ -112,21 +113,25 @@ const storeFile = () => path.join(stateDir(), "connections.json");
 /** Names that are Friday's own, or its tools': refused, so a pasted server can't stand in for them. */
 const RESERVED = new Set(["friday", "claude", "codex", "computer", "browser"]);
 
-export async function readStore(): Promise<Store> {
-  try {
-    const j = JSON.parse(await readFile(storeFile(), "utf8")) as Store;
-    return { servers: Array.isArray(j.servers) ? j.servers : [], ...(j.claudeCode ? { claudeCode: true } : {}) };
-  } catch {
-    return { servers: [] };
-  }
+/** The file as a store, or null when it isn't one (then it is set aside before anything is written: safe-file.ts updateJson). */
+const storeShape = (j: unknown): Store | null => {
+  if (!j || typeof j !== "object" || Array.isArray(j)) return null;
+  const x = j as Partial<Store>;
+  return { servers: Array.isArray(x.servers) ? x.servers : [], ...(x.claudeCode ? { claudeCode: true } : {}) };
+};
+
+/** For reading. A change goes through updateStore, never a read here written back: one unreadable would be written over as empty. */
+export function readStore(): Promise<Store> {
+  return readJson(storeFile(), storeShape, () => ({ servers: [] }));
 }
 
-async function writeStore(s: Store): Promise<void> {
-  await mkdir(stateDir(), { recursive: true });
-  const file = storeFile();
-  await writeFile(file, JSON.stringify(s, null, 2), { mode: 0o600 });
-  // Written before as 0644 by something else, it is made private again.
-  await chmod(file, 0o600).catch(() => {});
+/**
+ * The store read afresh, changed by `change` (in place; NO_WRITE to leave it) and written whole, one change at a time and under a
+ * lock against another Friday on this folder, so a change made meanwhile (a token refreshed by a run) isn't undone. Only this
+ * person can read it, as it holds the servers' keys: written before as 0644 by something else, it is made private again.
+ */
+function updateStore<R>(change: (s: Store) => R | Promise<R>): Promise<R> {
+  return updateJson(storeFile(), { shape: storeShape, empty: () => ({ servers: [] }), mode: 0o600, forceMode: true }, change);
 }
 
 export function viewOf(c: Connection): ConnectionView {
@@ -636,9 +641,11 @@ export async function addConnection(d: Draft, test = testConnection): Promise<Co
   };
   c.status = await test(c);
   c.enabled = c.status.ok;
-  const now = await readStore();
-  now.servers.push(c);
-  await writeStore(now);
+  await updateStore((now) => {
+    // Named again against the store as it is now: another server added meanwhile may have taken the name.
+    c.name = freeName(d.name, now.servers.map((x) => x.name));
+    now.servers.push(c);
+  });
   return c;
 }
 
@@ -647,38 +654,36 @@ export async function retestConnection(id: string, test = testConnection): Promi
   const c = s.servers.find((x) => x.id === id);
   if (!c) throw new Error("There's no such server.");
   const status = await test({ ...c, headers: await authHeaders(c) });
-  const now = await readStore();
-  const x = now.servers.find((y) => y.id === id);
-  if (!x) throw new Error("There's no such server.");
-  x.status = status;
-  await writeStore(now);
-  return x;
+  return updateStore((now) => {
+    const x = now.servers.find((y) => y.id === id);
+    if (!x) throw new Error("There's no such server.");
+    x.status = status;
+    return x;
+  });
 }
 
 /** Turned on or off, renamed, or given new values for its keys (a value left empty keeps the one it has). */
-export async function updateConnection(id: string, p: { enabled?: boolean; name?: string; env?: Record<string, string>; headers?: Record<string, string> }): Promise<Connection> {
-  const s = await readStore();
-  const c = s.servers.find((x) => x.id === id);
-  if (!c) throw new Error("There's no such server.");
-  if (p.enabled !== undefined) c.enabled = p.enabled;
-  if (p.name && clean(p.name) !== c.name) c.name = freeName(p.name, s.servers.filter((x) => x.id !== id).map((x) => x.name));
-  for (const [k, v] of Object.entries(p.env ?? {})) if (v && c.env && k in c.env) c.env[k] = v;
-  for (const [k, v] of Object.entries(p.headers ?? {})) if (v && c.headers && k in c.headers) c.headers[k] = /^(Bearer|Token|Basic)\s/i.test(v) ? v : (/^(Bearer|Token|Basic)\s/i.exec(c.headers[k]!)?.[0] ?? "") + v;
-  await writeStore(s);
-  return c;
+export function updateConnection(id: string, p: { enabled?: boolean; name?: string; env?: Record<string, string>; headers?: Record<string, string> }): Promise<Connection> {
+  return updateStore((s) => {
+    const c = s.servers.find((x) => x.id === id);
+    if (!c) throw new Error("There's no such server.");
+    if (p.enabled !== undefined) c.enabled = p.enabled;
+    if (p.name && clean(p.name) !== c.name) c.name = freeName(p.name, s.servers.filter((x) => x.id !== id).map((x) => x.name));
+    for (const [k, v] of Object.entries(p.env ?? {})) if (v && c.env && k in c.env) c.env[k] = v;
+    for (const [k, v] of Object.entries(p.headers ?? {})) if (v && c.headers && k in c.headers) c.headers[k] = /^(Bearer|Token|Basic)\s/i.test(v) ? v : (/^(Bearer|Token|Basic)\s/i.exec(c.headers[k]!)?.[0] ?? "") + v;
+    return c;
+  });
 }
 
 export async function removeConnection(id: string): Promise<void> {
-  const s = await readStore();
-  s.servers = s.servers.filter((x) => x.id !== id);
-  await writeStore(s);
+  await updateStore((s) => void (s.servers = s.servers.filter((x) => x.id !== id)));
 }
 
 export async function setClaudeCodeShared(on: boolean): Promise<void> {
-  const s = await readStore();
-  if (on) s.claudeCode = true;
-  else delete s.claudeCode;
-  await writeStore(s);
+  await updateStore((s) => {
+    if (on) s.claudeCode = true;
+    else delete s.claudeCode;
+  });
 }
 
 /** The servers in the person's own Claude Code setup (~/.claude.json's own), by name: what the switch would hand on. Friday's own is never one. */
@@ -943,17 +948,24 @@ export async function finishSignin(state: string, code: string, test = testConne
     ...(t.refresh_token ? { refreshToken: String(t.refresh_token) } : {}),
     ...(t.expires_in ? { expiresAt: Date.now() + Number(t.expires_in) * 1000 } : {}),
   };
-  const s = await readStore();
-  let c = (p.id && s.servers.find((x) => x.id === p.id)) || (p.catalog ? s.servers.find((x) => x.catalog === p.catalog) : undefined);
-  if (c) c.oauth = oauth;
-  else {
-    c = { id: randomBytes(6).toString("hex"), name: freeName(p.name, s.servers.map((x) => x.name)), enabled: false, transport: /\/sse\/?(\?|$)/i.test(p.url) ? "sse" : "http", url: p.url, addedAt: Date.now(), ...(p.catalog ? { catalog: p.catalog } : {}), oauth };
-    s.servers.push(c);
-  }
-  c.status = await test({ ...c, headers: { ...(c.headers ?? {}), Authorization: `Bearer ${oauth.accessToken}` } });
-  c.enabled = c.status.ok;
-  await writeStore(s);
-  return c;
+  // The tokens kept first, before the test (which can take a while): the sign-in isn't lost if the test is.
+  const c = await updateStore((s) => {
+    let c = (p.id && s.servers.find((x) => x.id === p.id)) || (p.catalog ? s.servers.find((x) => x.catalog === p.catalog) : undefined);
+    if (c) c.oauth = oauth;
+    else {
+      c = { id: randomBytes(6).toString("hex"), name: freeName(p.name, s.servers.map((x) => x.name)), enabled: false, transport: /\/sse\/?(\?|$)/i.test(p.url) ? "sse" : "http", url: p.url, addedAt: Date.now(), ...(p.catalog ? { catalog: p.catalog } : {}), oauth };
+      s.servers.push(c);
+    }
+    return { ...c };
+  });
+  const status = await test({ ...c, headers: { ...(c.headers ?? {}), Authorization: `Bearer ${oauth.accessToken}` } });
+  return updateStore((s) => {
+    const x = s.servers.find((y) => y.id === c.id);
+    if (!x) return Object.assign(c, { status, enabled: status.ok });
+    x.status = status;
+    x.enabled = status.ok;
+    return x;
+  });
 }
 
 /**
@@ -967,12 +979,12 @@ export async function authHeaders(c: Connection): Promise<Record<string, string>
     try {
       const t = await tokenRequest(o, { grant_type: "refresh_token", refresh_token: o.refreshToken });
       o = { ...o, accessToken: String(t.access_token), ...(t.refresh_token ? { refreshToken: String(t.refresh_token) } : {}), ...(t.expires_in ? { expiresAt: Date.now() + Number(t.expires_in) * 1000 } : {}) };
-      const s = await readStore();
-      const x = s.servers.find((y) => y.id === c.id);
-      if (x) {
-        x.oauth = o;
-        await writeStore(s);
-      }
+      const got = o;
+      await updateStore((s) => {
+        const x = s.servers.find((y) => y.id === c.id);
+        if (!x) return NO_WRITE;
+        x.oauth = got;
+      });
       c.oauth = o;
     } catch {
       /* the old one goes on; its test will say */

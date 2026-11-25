@@ -129,6 +129,21 @@ html.dark .mdir-mark.mdir-own { background: color-mix(in srgb, var(--ink) 8%, va
 .mdir-own-line { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; word-break: break-all; }
 .mdir-sheet .mdir-own-line { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mdir-empty { margin: 4px 10px; color: var(--text-muted); font-size: 13px; }
+/* Before the list is read (Directory, servers null): the kinds and the cards in their places, still, in the placeholder's tone. */
+.mdir-skel-filters { gap: 18px; padding: 9px 10px; }
+.mdir-skel-filters .mdir-sep { margin: -9px 0; }
+.mdir-skel-head { margin: 4px 0 14px 2px; }
+.mdir-card.mdir-card-skel { gap: 8px; cursor: default; box-shadow: none; }
+.mdir-card.mdir-card-skel:hover { border-color: var(--border); box-shadow: none; transform: none; }
+.mdir-card-skel .mdir-card-top { margin-bottom: 4px; }
+/* The real cards rise into the placeholders' room once, as the list lands. */
+.mdir-landed .mdir-list { animation: tm-rise var(--t-open) var(--ease-out) both; }
+/* Read before, and not read again just now: said over the cards, which stay. */
+.msv-stale { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 12px; border: 1px solid color-mix(in srgb, var(--red) 28%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--red) 4%, var(--card)); color: var(--ink-2); font-size: 12.5px; line-height: 18px; }
+.msv-stale > svg { color: var(--red); }
+.msv-stale > span { flex: 1; min-width: 0; }
+.msv-failed { padding-top: 56px; }
+@media (prefers-reduced-motion: reduce) { .mdir-landed .mdir-list { animation: none; } }
 .mdir-more { align-self: flex-start; font-size: 12.5px; }
 .mdir-note { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 18px; text-wrap: pretty; }
 @media (max-width: 860px) {
@@ -137,6 +152,8 @@ html.dark .mdir-mark.mdir-own { background: color-mix(in srgb, var(--ink) 8%, va
   .mdir-filters::-webkit-scrollbar { display: none; }
   .mdir-filter { flex: none; }
   .mdir-sep { display: none; }
+  .mdir-skel-filters { gap: 10px; padding: 9px 4px; overflow: hidden; }
+  .mdir-skel-filters .sk { width: 64px !important; }
 }
 @media (max-width: 640px) {
   .mdir-cards { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }

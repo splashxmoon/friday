@@ -28,8 +28,8 @@ test("every thing on a Settings page is found by its own word (audit e2e, Arun 2
   assert.deepEqual(ids("export"), ["data"]);
   assert.deepEqual(ids("heatmap"), ["usage-limits"]);
   // Only the open-source edition has the Tailscale and Send feedback rows: the hosted one finds nothing for them. Neither has a
-  // phone row: the open-source app has no phone app to pair yet (Arun, 2026-11-04).
-  for (const q of ["phone", "iPhone"]) assert.deepEqual(ids(q), [], q);
+  // phone section: phones pair with this computer's Friday, the open-source edition's.
+  // The open-source edition's Settings › Phone (2026-11-24) is found by the phone and the app's words.
   assert.deepEqual(ids("Tailscale"), ["other-computers"], "Tailscale");
   assert.deepEqual(ids("feedback"), ["help"]);
   // Backdrops find nothing in the hosted edition; the open-source one has a section for them (since v0.4.1), found by what it is.

@@ -42,6 +42,7 @@ import { useVoice, VoiceBar, VoiceButton, VoiceLive } from "./VoiceMic.js";
 const AutoTool = lazy(() => import("./ide/auto-tool.js"));
 const RunLater = lazy(() => import("./ide/RaceButton.js").then((m) => ({ default: m.RunLater })));
 const RaceButton = lazy(() => import("./ide/RaceButton.js").then((m) => ({ default: m.RaceButton })));
+// The iPhone card and its code-drawing, after the box (client-bundle.test.ts: no qrcode-generator in the first load).
 
 // The message box is this page's state, so every keystroke draws the page again. These take nothing that changes as you type,
 // so they are left as they were. The template shelf is not among them: it is given what is in the box.
@@ -336,6 +337,8 @@ export function Code({
     return () => clearTimeout(t);
   }, [goal]); // eslint-disable-line react-hooks/exhaustive-deps
   const [cloning, setCloning] = useState(false);
+  // A folder picked from the card still being looked at: Start waits for it, or the run would go to a new project folder instead.
+  const [opening, setOpening] = useState(false);
   /**
    * A pull-request link is the change to look at: the agent is told what it is, and the folder is put on its branch rather
    * than a new one, so reviewing or carrying on happens where the change lives.
@@ -596,6 +599,8 @@ export function Code({
   const submit = async () => {
     // In Code's column a chat starts only in the folder Code has open: not before that folder is known, never in one of its own.
     if (inColumn && !folder) return setErr(hasMachine ? "Still opening the folder. Send again in a moment." : "Connect this computer first.");
+    // A folder picked (or cloned) and not yet open isn't no folder: started now, the run would work in a new one of its own.
+    if (opening || cloning) return setErr("Still opening the folder. Send again in a moment.");
     // "/brief": the daily brief, not a task (DailyBrief.tsx).
     if (goal.trim().toLowerCase() === "/brief") return void (setGoal(""), openBrief());
     if (blocked && goal.trim()) return setNudged(true);
@@ -1148,6 +1153,7 @@ export function Code({
                 tool: engine || "claude",
                 resume: picked?.resume,
                 onPick: setPicked,
+                onOpening: setOpening,
                 onTool: (t) => ((chose.current = true), setEngine(t)),
                 // In the app, it connects itself (the box says so); in a browser, straight to connecting this computer.
                 ...(hasMachine ? {} : { onNeedsMachine: () => (window.fridayDesktop?.link ? setLinking(true) : connectThisComputer()) }),
@@ -1246,10 +1252,10 @@ export function Code({
             <button
               className="send"
               type="submit"
-              disabled={!goal.trim() || busy || blocked}
+              disabled={!goal.trim() || busy || blocked || opening || cloning}
               aria-label="Start the run"
               // A new session starts from what it is asked to do, so files alone don't start one: said, rather than a grey arrow.
-              title={blockedWhy || (!goal.trim() && files.length ? "Say what to do with the files you attached" : undefined)}
+              title={blockedWhy || (opening || cloning ? "Opening the folder you picked" : !goal.trim() && files.length ? "Say what to do with the files you attached" : undefined)}
             >
               {busy ? <span className="spinner" /> : <Icon name="arrowUp" size={17} />}
             </button>
@@ -1374,7 +1380,10 @@ export function Code({
       {/* Someone new: the things that show what Friday is for, one press each (GettingStarted.tsx). In both editions, the hosted
           service following the local build (Arun, 2026-11-04); "Since you left" below still says what happened while away. */}
       {/* Today (Today.tsx): last night's queue, work found in your repos, and Tonight, with the box's coding tool. Local edition only: it runs on this computer. */}
+      {/* Friday is on iPhone: the TestFlight code and the way to pair, until a phone pairs or it is put away (PhoneAppCard.tsx). In
+          Arun's own build only while the phone app has more to do (Arun, 2026-11-25: "leave all of the phone stuff out for now"). */}
       {isLocal() && <TodayCard identity={identity} tool={engine || ""} mode={mode} fullAccess={access === "bypass"} model={model} box={{ account, accounts: tool?.accounts, effort, levels: effortLevels }} />}
+      {/* Each project's Captain: how its project stands, what's for you and what's ready (Managers.tsx, spec 14 P3). */}
       <GettingStarted recents={recents} onPickFolder={() => setTimeout(() => document.querySelector<HTMLButtonElement>(".cw-drop")?.click(), 0)} />
       {/* The morning brief or evening wrap-up across everything, then what happened in each session while you were away. */}
       <DailyBriefCard />

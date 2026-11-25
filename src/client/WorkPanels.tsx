@@ -6,9 +6,10 @@
  * codex have on their chats").
  *
  */
-import { Component, createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ErrorInfo, type MouseEvent, type ReactNode } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Streamdown } from "streamdown";
+import { Guard } from "./guard.js";
 import { Icon } from "./icons.js";
 import { relTime } from "./ui.js";
 import { dirOf, fileTitle, fromTop, headingOf, wordCount, inFolderRef, PAGE_REFS, pageRef, frameScope, pieceTitle, plainLine, resolveFrom, sheetRows, workPoller, type Listed } from "./work-outputs.js";
@@ -130,34 +131,29 @@ export function useTried(): [string, (p: Promise<string>) => void] {
   ];
 }
 
-/** A reader that failed to draw what it was given: says so, with a way back, instead of taking the whole app down with it. */
-export class ReaderGuard extends Component<{ onBack: () => void; children: ReactNode; reset: string }, { failed: string; at: string }> {
-  state = { failed: "", at: this.props.reset };
-  static getDerivedStateFromError(e: Error) {
-    return { failed: e.message || "Something in it couldn't be drawn." };
-  }
-  static getDerivedStateFromProps(p: { reset: string }, s: { failed: string; at: string }) {
-    return p.reset !== s.at ? { failed: "", at: p.reset } : null;
-  }
-  componentDidCatch(e: Error, info: ErrorInfo) {
-    console.warn("[work reader]", e, info.componentStack);
-  }
-  render() {
-    if (!this.state.failed) return this.props.children;
-    return (
-      <div className="work-doc">
-        <div className="work-empty" role="alert">
-          <Icon name="file" size={20} />
-          <b>This one couldn't be shown here</b>
-          <span>{this.state.failed}</span>
-          <button type="button" className="btn small" onClick={this.props.onBack}>
-            <Icon name="arrowLeft" size={13} />
-            Back
-          </button>
+/** A reader that failed to draw what it was given: says so, with a way back, instead of taking the whole app down with it (guard.tsx). */
+export function ReaderGuard({ onBack, children, reset }: { onBack: () => void; children: ReactNode; reset: string }) {
+  return (
+    <Guard
+      where="work reader"
+      reset={reset}
+      fallback={(c) => (
+        <div className="work-doc">
+          <div className="work-empty" role="alert">
+            <Icon name="file" size={20} />
+            <b>This one couldn't be shown here</b>
+            <span>{c.error.message || "Something in it couldn't be drawn."}</span>
+            <button type="button" className="btn small" onClick={onBack}>
+              <Icon name="arrowLeft" size={13} />
+              Back
+            </button>
+          </div>
         </div>
-      </div>
-    );
-  }
+      )}
+    >
+      {children}
+    </Guard>
+  );
 }
 
 /** The folder all of these are in, when they share one: `outputs/friday-studio` for its files and its subfolders'. */

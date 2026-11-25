@@ -73,6 +73,16 @@
 /* Test proof (TestProofCard.tsx): one slim line, a line per command under it when there are several. */
 .tpc { width: 100%; max-width: 540px; margin: 8px 0 4px; padding: 6px 6px 6px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
 .tpc-head { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 24px; }
+/* At a phone's width the head keeps to one line inside the card (spec 13 polish: it ran past it at 420): "by Friday", Output's chevron
+   alone, then the counts go, a failure's first ("1 test failing" says it). The command gives way first, cut with an ellipsis. */
+.tpc { container: tpc / inline-size; }
+@container tpc (max-width: 470px) {
+  .tpc-head { gap: 6px; }
+  .tpc-head .tpc-long { display: none; }
+  .tpc-tog { width: 24px; padding: 0; justify-content: center; }
+}
+@container tpc (max-width: 400px) { .tpc.is-bad .tpc-head > .tpc-counts { display: none; } }
+@container tpc (max-width: 330px) { .tpc-head > .tpc-counts { display: none; } }
 .tpc-badge { display: grid; flex: none; place-items: center; width: 16px; height: 16px; border-radius: 50%; color: #fff; }
 .tpc.is-ok .tpc-badge { background: var(--green); }
 .tpc.is-bad .tpc-badge { background: var(--red); }

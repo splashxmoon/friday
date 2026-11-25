@@ -4,6 +4,7 @@
  * their permission words; the new-session page's Work mode, its starters and its second tool went with it.
  */
 import { useEffect, useRef, useState } from "react";
+import { pollWhileShown } from "./app-push.js";
 import type { EngineMode } from "../types.js";
 import { Icon } from "./icons.js";
 import { api } from "./api.js";
@@ -71,13 +72,13 @@ export function useWorkSessions(identity: Identity): Set<string> {
         })
         // Unreadable, the lists show as they are rather than empty for good.
         .catch(() => void ((listed = true), bump((n) => n + 1)));
-    look();
-    const t = setInterval(look, 30_000);
+    // Asked when a session's log grows (a new one among them; app-push.ts), not every 30 seconds; as before where nothing tells it.
+    const stop = pollWhileShown(look, { every: 30_000, on: ["sessions"] });
     const heard = () => bump((n) => n + 1);
     addEventListener("friday:work-sessions", heard);
     return () => {
       gone = true;
-      clearInterval(t);
+      stop();
       removeEventListener("friday:work-sessions", heard);
     };
   }, [identity.id]);

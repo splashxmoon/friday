@@ -9,7 +9,10 @@ import { hunksOf } from "./git-hunks.js";
 import { Icon } from "./icons.js";
 import { patchLines } from "./patchLines.js";
 import { ShipDialog } from "./ShipLazy.js";
-import { Picker, relTime, useConfirm } from "./ui.js";
+import { Picker, Skeleton, SkeletonCode, relTime, useConfirm } from "./ui.js";
+import { CircleAlertIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/dass/EmptyState";
 import type { Send } from "./useSession.js";
 
 /**
@@ -40,9 +43,11 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
   const [log, setLog] = useState<LogEntry[] | null>(null);
   const [compare, setCompare] = useState<Compare | null>(null);
   const [error, setError] = useState("");
+  /** The last look at the folder got no answer: before the first one did, said with Try again where the files would be. */
+  const [unread, setUnread] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<Key | null>(null);
-  const [patches, setPatches] = useState<Record<string, DiffFile[] | "loading" | "none">>({});
+  const [patches, setPatches] = useState<Record<string, DiffFile[] | "loading" | "none" | "failed">>({});
   const openRef = useRef(open);
   openRef.current = open;
   const patchesRef = useRef(patches);
@@ -91,6 +96,7 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
     setError("");
     const [s, l] = await Promise.all([read<RepoStatus>("status"), read<{ commits: LogEntry[] }>("log", "&limit=40")]);
     if (!alive.current) return;
+    setUnread(!s);
     if (s) setStatus(s);
     if (l) setLog(l.commits);
     // How the branch stands to main (the runner finds it locally, on origin, or as master), when it isn't that branch. A
@@ -133,6 +139,19 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
 
   /** The file's hunks, or a commit's changes, fetched when its row opens, and again after each fresh look while it is open. */
   const toggle = (key: Key) => setOpen(open === key ? null : key);
+  /** A change that couldn't be read, read again: forgotten, and looked at afresh. */
+  const readAgain = (key: Key) => {
+    setPatches((p) => Object.fromEntries(Object.entries(p).filter(([k]) => k !== key)));
+    setLooked((n) => n + 1);
+  };
+  const failedRead = (key: Key, what: string) => (
+    <p className="gx-failed" role="alert">
+      Couldn't read {what}.{" "}
+      <button type="button" className="link-btn" onClick={() => readAgain(key)}>
+        Try again
+      </button>
+    </p>
+  );
   const readFor = useRef({ open, looked });
   useEffect(() => {
     if (!open) return;
@@ -149,7 +168,8 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
       ? read<{ files: DiffFile[] }>("show", `&ref=${encodeURIComponent(ref)}`)
       : read<{ files: DiffFile[] }>("gitdiff", `&staged=${kind === "staged" ? 1 : 0}&path=${encodeURIComponent(ref)}`)
     ).then((got) => {
-      if (!stale && alive.current) setPatches((p) => ({ ...p, [open]: got?.files?.length ? got.files : "none" }));
+      // Nothing came back is not "nothing changed": said as a read that failed, with Try again (below).
+      if (!stale && alive.current) setPatches((p) => ({ ...p, [open]: got === null ? (Array.isArray(p[open]) ? p[open] : "failed") : got.files?.length ? got.files : "none" }));
     });
     return () => void (stale = true);
   }, [open, looked, read]);
@@ -206,7 +226,9 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
         {on && (
           <div className="gitp-hunks">
             {got === "loading" || !got ? (
-              <p className="muted small">Reading…</p>
+              <SkeletonCode lines={6} label="Reading the change" />
+            ) : got === "failed" ? (
+              failedRead(key, "this change")
             ) : got === "none" ? (
               <p className="muted small">{kind === "untracked" ? "An empty file." : entry?.status === "deleted" ? "The whole file was deleted." : "Nothing to show."}</p>
             ) : (
@@ -322,10 +344,25 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
           </p>
         )}
       </header>
-      {error && <p className="form-error gitp-error">{error}</p>}
+      {error && !(unread && !status) && <p className="form-error gitp-error">{error}</p>}
       <div className="gx-body">
         {!status ? (
-          <p className="gx-quiet">Reading the folder's git…</p>
+          unread ? (
+            <EmptyState small className="gx-unread" tone="bad" icon={<CircleAlertIcon />} title="Couldn't read the folder's git" action={<Button variant="outline" size="sm" onClick={() => void refresh()}>Try again</Button>}>
+              <span role="alert">{error || "Friday didn't answer. The computer may be busy or offline."}</span>
+            </EmptyState>
+          ) : (
+            // The changes in their shape while git is read: a heading and a few file rows.
+            <div className="gx-skel" role="status" aria-label="Reading the folder's git">
+              <Skeleton w={92} h={12} />
+              {[52, 38, 60].map((w, i) => (
+                <div key={i} className="gx-skel-file">
+                  <Skeleton w={14} h={14} r={4} />
+                  <Skeleton w={`${w}%`} h={11} />
+                </div>
+              ))}
+            </div>
+          )
         ) : changed === 0 ? (
           <div className="gx-clean">
             <span className="gx-clean-mark" aria-hidden="true">
@@ -401,7 +438,18 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
             {unpushed > 0 && <span className="gx-unpushed">{unpushed} not pushed</span>}
           </header>
           {!log ? (
-            <p className="gx-quiet">Reading…</p>
+            // The commits' rows in grey: a dot, a subject, who and when.
+            <div className="gx-skel-log" role="status" aria-label="Reading the history">
+              {[64, 48, 72, 40, 56].map((w, i) => (
+                <div key={i} className="gx-skel-commit">
+                  <Skeleton w={9} h={9} r={5} />
+                  <div className="gx-skel-text">
+                    <Skeleton w={`${w}%`} h={11} />
+                    <Skeleton w={`${w / 2 + 12}%`} h={9} />
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : log.length === 0 ? (
             <p className="gx-quiet">No commits yet.</p>
           ) : (
@@ -428,7 +476,9 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
                     {on && (
                       <div className="gitp-hunks gx-hunks">
                         {got === "loading" || !got ? (
-                          <p className="muted small">Reading…</p>
+                          <SkeletonCode lines={6} label="Reading the commit" />
+                        ) : got === "failed" ? (
+                          failedRead(key, "this commit")
                         ) : got === "none" ? (
                           <p className="muted small">No file changes in this commit.</p>
                         ) : (

@@ -6,7 +6,8 @@ import { shortDuration, shortTokens, usageReport, type RunUsage, type UsageRow }
 import { agentNameFor } from "./Activity.js";
 import { Icon } from "./icons.js";
 import type { Identity } from "./storage.js";
-import { relTime } from "./ui.js";
+import { agoWords } from "./ui.js";
+import { useNow } from "./presence.js";
 
 /**
  * What this session has used, in the order a person asks it:
@@ -23,16 +24,15 @@ import { relTime } from "./ui.js";
  * with no Friday allowance above it.
  */
 
-const ago = (ts: number) => {
-  const r = relTime(ts);
-  return r === "now" ? "just now" : `${r} ago`;
-};
+const ago = agoWords;
 
 /** A run that has been "going" for days was cut off, not working: show no length for it rather than a number nobody believes. */
 const believable = (run: RunUsage) => run.outcome !== "running" && run.seconds > 0 && run.seconds < 6 * 3600;
 
 /** `solo`: everything here is yours and runs on your own plans, so there is no Friday allowance to show and no "Arun's" on names. */
 export function UsagePanel({ state, events, identity, solo = false }: { state: SessionState; events: SessionEvent[]; identity: Identity; solo?: boolean }) {
+  // "Last ran 4m ago" and each run's time move as time does, not only when the session's log does.
+  useNow(30_000);
   const live = useMemo(() => new Set<string>([...(state.run.status === "running" ? [MAIN_LANE] : []), ...Object.entries(state.laneRuns).filter(([, x]) => x.status === "running").map(([id]) => id)]), [state.run.status, state.laneRuns]);
   const r = useMemo(() => usageReport(events, (lane) => (solo ? agentNameFor(state, lane).replace(/^[^']+'s /, "") : agentNameFor(state, lane)), live), [events, state, live, solo]);
   const [all, setAll] = useState(false);

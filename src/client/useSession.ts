@@ -13,6 +13,16 @@ export type { Digest } from "../session/digest.js";
 const AWAY_MS = 60_000;
 /** How long a command waits for a socket that is opening before it says it isn't connected. */
 const SEND_WAIT_MS = 8_000;
+/** How often the page looks at the clock for a sleep it slept through, and how far behind it has to be to count as one. */
+export const WAKE_TICK_MS = 5_000;
+export const WAKE_GAP_MS = 20_000;
+/**
+ * Whether the computer slept between two ticks of a WAKE_TICK_MS timer: timers don't run while it sleeps, so the next tick comes
+ * late by about as long as it slept. A tick a little late (a busy page) is not a sleep; one late by WAKE_GAP_MS is.
+ */
+export const sleptBetween = (lastTick: number, now: number, tickMs = WAKE_TICK_MS, gapMs = WAKE_GAP_MS): boolean => now - lastTick - tickMs >= gapMs;
+/** The desktop app's word that the computer woke or was unlocked (preload.ts onResume); undefined in a browser or an older app. */
+const onResume = (fn: () => void): (() => void) | undefined => (typeof window !== "undefined" ? (window as { fridayDesktop?: { onResume?: (fn: () => void) => () => void } }).fridayDesktop?.onResume?.(fn) : undefined);
 
 export type ConnState = "connecting" | "live" | "reconnecting" | "rejected" | "removed";
 /**
@@ -454,6 +464,21 @@ export function useSession(sid: string, invite: string, who: Identity) {
       checkAlive();
     };
     window.addEventListener("online", onOnline);
+    /**
+     * Woken from sleep: sleep doesn't hide the page in the desktop app, so nothing above heard it, and only the next ping found the
+     * dead socket, up to 35 seconds of "live" over nothing (spec 13). The open-source app says so (onResume); in a browser, or the
+     * product's desktop app whose shell doesn't, a clock that jumped says it, which a page that slept always sees. Either way the
+     * link is checked at once, as on coming back online.
+     */
+    const stopResume = onResume(onOnline);
+    let lastTick = Date.now();
+    const wakeWatch = window.setInterval(() => {
+      const now = Date.now();
+      const slept = sleptBetween(lastTick, now);
+      lastTick = now;
+      // A hidden tab's timers run late by design, and coming back to it is checked anyway (onVisible).
+      if (slept && document.visibilityState === "visible") onOnline();
+    }, WAKE_TICK_MS);
     const connect = () => {
       retry = undefined;
       greeted = false;
@@ -527,6 +552,8 @@ export function useSession(sid: string, invite: string, who: Identity) {
       clearTimeout(dead);
       clearTimeout(helloWait);
       clearInterval(pinger);
+      clearInterval(wakeWatch);
+      stopResume?.();
       window.removeEventListener("online", onOnline);
       document.removeEventListener("visibilitychange", scheduleAck);
       document.removeEventListener("visibilitychange", onVisible);

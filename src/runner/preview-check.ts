@@ -6,6 +6,7 @@ import path from "node:path";
 import { beforeBase, clipTargets, encodeScript, GIF_MAX_BYTES, gifTries, walkPage, type ClipMark, type ClipTarget } from "../clip-walk.js";
 import { CLIP, mergeErrors, pagesFor, VIEWS, webmWithDuration, type Layout } from "../preview-check.js";
 import { reusableServer } from "./dev-servers.js";
+import { inWorktreeLine } from "./git.js";
 import { listServers } from "./ports.js";
 import { previewStatusLive, previewTrouble, startPreview, stopPreview } from "./preview.js";
 import { canClipViaDesktop, canScreenshot, capture, clipViaDesktop } from "./screenshot.js";
@@ -444,7 +445,7 @@ async function beforeWork(cwd: string, u: URL, width: "laptop" | "phone", files:
   const folder = rel ? path.join(copy, rel) : copy;
   let added = false;
   try {
-    await git(root, ["worktree", "add", "--detach", "--force", copy, base], 120_000);
+    await inWorktreeLine(root, () => git(root, ["worktree", "add", "--detach", "--force", copy, base], 120_000));
     added = true;
     // What the copy needs to run and git doesn't hold: the installed packages (linked, not copied) and the folder's .env files.
     const link = async (from: string, to: string) => {
@@ -473,8 +474,8 @@ async function beforeWork(cwd: string, u: URL, width: "laptop" | "phone", files:
     stopPreview(folder);
     // Windows lets go of a folder only once the server's processes are gone (taskkill is on its way).
     if (process.platform === "win32") await sleep2(1500);
-    if (added) await git(root, ["worktree", "remove", "--force", copy], 60_000).catch(() => {});
+    if (added) await inWorktreeLine(root, () => git(root, ["worktree", "remove", "--force", copy], 60_000)).catch(() => {});
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
-    await gitOr(root, ["worktree", "prune"]);
+    await inWorktreeLine(root, () => gitOr(root, ["worktree", "prune"]));
   }
 }

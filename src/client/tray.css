@@ -84,3 +84,7 @@ html.tray-view .tp .tp-new input { cursor: text !important; }
 /* A Done row's proof clip (TrayPanel.tsx), between its words and its time: the grid gains a column only when a row has one. */
 .tp-row:has(.tp-clip) { grid-template-columns: 18px minmax(0, 1fr) 56px auto; }
 .tp-clip { width: 56px; height: 35px; border: 1px solid var(--border); border-radius: 6px; background: var(--hover); object-fit: cover; object-position: top; }
+/* A Captain's question, answered in your words from the menu bar. */
+.tp-reply { display: flex; gap: 6px; margin: 2px 0 6px; }
+.tp-reply input { flex: 1; min-width: 0; height: 28px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--tp-line); background: transparent; color: var(--tp-ink); font: 400 12.5px/1 var(--font); }
+.tp-reply input:focus { outline: 2px solid var(--border-focus, #4c8bf5); outline-offset: -1px; }

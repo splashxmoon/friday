@@ -105,9 +105,32 @@ export function registerBrowser(getWin: () => BrowserWindow | null, fromApp: (e:
   ipcMain.on("friday:browser-gone", (e, sid: unknown) => {
     if (fromApp(e) && typeof sid === "string") panels.delete(sid);
   });
-  setBrowserDriver({ act: (sid, ask, signal, lane) => act(getWin, sid, lane, ask, signal) });
+  setBrowserDriver({ act: (sid, ask, signal, lane) => act(getWin, sid, lane, ask, signal), wedged });
   // For a check by hand without a coding tool: FRIDAY_BROWSER_DEBUG=1 puts the driver where the main process's inspector reaches it.
   if (process.env.FRIDAY_BROWSER_DEBUG === "1") (globalThis as Record<string, unknown>).fridayBrowser = (sid: string, ask: BrowserAsk, lane?: string) => act(getWin, sid, lane, ask);
+}
+
+/**
+ * The agent's page didn't answer an action in time (browser-driver.ts browserCall): a page of its own that is stuck (a script that
+ * never ends, a dialog nobody sees, a renderer gone) is closed, so its next open starts a fresh one rather than waiting on the same
+ * page again. A tab in the person's Browser panel is theirs to look at: it is only told to stop loading, and kept.
+ */
+function wedged(sid: string, lane: string): void {
+  const key = browserKey(sid, lane);
+  const bg = background.get(key);
+  const wc = alive(used.get(key));
+  if (bg && (!wc || bg.win.webContents === wc)) {
+    background.delete(key);
+    used.delete(key);
+    aside.delete(key);
+    if (!bg.win.isDestroyed()) bg.win.destroy();
+    return;
+  }
+  try {
+    wc?.stop();
+  } catch {
+    // A page gone already: nothing to stop.
+  }
 }
 
 /** Until the page has stopped loading, or `ms`. */

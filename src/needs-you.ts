@@ -63,8 +63,19 @@ export interface NeedsDeps {
   checks?: { answer(wid: string, me: Me, repo: string, entry: string, take: boolean): Promise<unknown> };
   /** Hosted Crew: the workspace's asks, and a keeper's answer to one. */
   crew?: { asks(wid: string): Promise<CrewAskLike[]>; answer(wid: string, me: Me, id: string, take: boolean, note?: string): Promise<unknown> };
+  /** Project Captains (managers.ts): their open questions for the person, and an answer to one (or put away, with null). */
+  captains?: { asks(): Promise<CaptainAskLike[]>; answer(id: string, at: number, text: string | null): Promise<unknown> };
   /** The open-source edition's crew workflows: runs waiting at a Your OK, and the answer to one (team-workflows.ts). */
   workflows?: { asks(): Promise<WorkflowAskLike[]>; answer(id: string, run: string, ok: boolean, said: string): Promise<unknown> };
+}
+
+/** A Captain's question for the person: which Captain, when it asked, what, about which project and thread. */
+export interface CaptainAskLike {
+  id: string;
+  at: number;
+  text: string;
+  project: string;
+  sid?: string;
 }
 
 /** A crew workflow's run waiting at its Your OK step. */
@@ -91,6 +102,7 @@ type Act =
   | { do: "resume"; sid: string; lane: string; at: number }
   | { do: "crew"; ask: string }
   | { do: "workflow"; id: string; run: string }
+  | { do: "captain"; id: string; at: number }
   | { do: "check"; repo: string; entry: string }
   | { do: "open" };
 
@@ -374,6 +386,24 @@ export function crewNeed(a: CrewAskLike, board?: SessionState): Found {
   };
 }
 
+/** A project Captain's question: answered in your own words, which it passes on to the thread, or put away. */
+export function captainNeed(a: CaptainAskLike): Found {
+  return {
+    need: {
+      id: `cap~${a.id}~${a.at}`,
+      kind: "crew",
+      who: `${a.project}'s Captain`,
+      where: { title: a.project, ...(a.sid ? { sid: a.sid } : {}) },
+      text: a.text,
+      since: a.at,
+      blocks: { agents: 1, tasks: 0 },
+      choices: [{ label: "Put away", value: "away" }],
+      free: true,
+    },
+    act: { do: "captain", id: a.id, at: a.at },
+  };
+}
+
 /**
  * A workflow waiting at its Your OK: on this list as everywhere else that waits on you. It showed only on the canvas and in the
  * Crew room, with Needs you saying "Nothing is waiting on you" and its badge at 0 (2026-11-04 end-to-end check).
@@ -464,6 +494,7 @@ export class NeedsYou {
       }),
     );
     if (this.d.workflows) for (const a of await this.d.workflows.asks().catch(() => [] as WorkflowAskLike[])) found.push(workflowNeed(a));
+    if (this.d.captains) for (const a of await this.d.captains.asks().catch(() => [] as CaptainAskLike[])) found.push(captainNeed(a));
     if (this.d.crew && wid) {
       const asks = (await this.d.crew.asks(wid).catch(() => [])).filter((a) => a.keeper.id === me.id && a.status === "open");
       for (const a of asks) found.push(crewNeed(a, a.board ? states.get(a.board.sid) : undefined));
@@ -545,7 +576,7 @@ export class NeedsYou {
    * rather than landing somewhere it no longer fits. `answer` is a choice's value, or their own words where the item takes them.
    */
   async answer(me: Me, wid: string, id: string, answer: string, edited = false): Promise<{ ok: true; said: string } | { ok: false; status: number; error: string }> {
-    const sid = id.startsWith("crew~") || id.startsWith("wf~") ? "" : id.split("~")[0]!;
+    const sid = id.startsWith("crew~") || id.startsWith("wf~") || id.startsWith("cap~") ? "" : id.split("~")[0]!;
     const found = (await this.collect(me, wid, sid ? [sid] : [])).find((f) => f.need.id === id);
     if (!found) return { ok: false, status: 404, error: "That's no longer waiting on you: it was answered or went away." };
     const n = found.need;
@@ -588,6 +619,9 @@ export class NeedsYou {
         case "workflow":
           // Your own words: a no, with what to change, as the canvas's Say no takes it.
           await this.d.workflows!.answer(a.id, a.run, !!choice && answer === "yes", choice ? "" : text);
+          break;
+        case "captain":
+          await this.d.captains!.answer(a.id, a.at, choice ? null : text);
           break;
         case "check":
           if (!this.d.checks) return { ok: false, status: 400, error: "Open it to answer." };

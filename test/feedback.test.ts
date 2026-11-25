@@ -10,6 +10,8 @@ test("send feedback opens a new GitHub issue with the version and system filled 
   const body = url.searchParams.get("body") ?? "";
   assert.match(body, /\*\*What happened\*\*/);
   assert.match(body, /Friday 0\.2\.0 · macOS · desktop app$/);
+  // Where to get the diagnostics, to paste if they choose: nothing is attached for them (diagnostics.ts).
+  assert.match(body, /Settings › Updates › Copy diagnostics, then paste it here\. It leaves out keys, tokens and file contents\./);
   assert.deepEqual([...url.searchParams.keys()], ["body"], "no title, labels or anything else is set for them");
   assert.match(new URL(feedbackUrl({ version: "", os: "Linux", app: false })).searchParams.get("body")!, /Friday \(version unknown\) · Linux · browser$/);
 });

@@ -41,3 +41,16 @@ test("run on its own, it answers its one route and says nothing else", async (t)
   assert.equal((await fetch(`${base}/`, {})).status, 404);
   assert.deepEqual(await (await fetch(`${base}/healthz`)).json(), { ok: true, push: true });
 });
+
+test("a .p8 key pasted on one line, with its breaks as spaces, as \\n or run together, still signs (Render, 2026-11-24)", async () => {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { pemOf, providerToken } = await import("../src/push-relay.js");
+  const pem = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ type: "pkcs8", format: "pem" }).toString().trim();
+  const lines = pem.split("\n");
+  for (const pasted of [pem, lines.join(" "), lines.join("\\n"), `${lines[0]}${lines.slice(1, -1).join("")}${lines.at(-1)}`, `  ${pem}\n`]) {
+    const key = pemOf(pasted)!;
+    assert.match(providerToken({ key, keyId: "ABC123DEFG", teamId: "24DXLQLMPR", topic: "com.tryfridaywork.friday" }), /^[\w-]+\.[\w-]+\.[\w-]+$/);
+  }
+  assert.equal(pemOf(undefined), undefined);
+  assert.equal(pemOf("  "), undefined);
+});

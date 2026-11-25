@@ -14,6 +14,7 @@ import { freeLine, roleWord } from "./team-status.js";
 import { plainRisk } from "../plain-risk.js";
 import { mateItems } from "./mate-menu.js";
 import { MenuButton, useConfirm } from "./ui.js";
+import { useNow } from "./presence.js";
 import "./agents-page.css";
 
 /**
@@ -24,6 +25,8 @@ import "./agents-page.css";
 export default function AgentsPage({ identity, onOpen, needs = [] }: { identity: Identity; onOpen: (r: RecentSession) => void; /** What waits on you (Attention.tsx), the crew's own shown here. */ needs?: Attention[] }) {
   const t = useTeam(identity);
   const [ask, confirmUI] = useConfirm();
+  // Each row's "2m" moves as time does, not only when the crew's reading changes.
+  const now = useNow(30_000);
   const [rooming, setRooming] = useState(false);
   const [brief, setBrief] = useState<TeamBrief | null>(null);
   const [at, setAt] = useState(0);
@@ -164,7 +167,7 @@ export default function AgentsPage({ identity, onOpen, needs = [] }: { identity:
                       </span>
                       <span className={`ap-row-line s-${s.state}`}>{line}</span>
                     </span>
-                    {m.lastAt ? <span className="ap-when">{ago(m.lastAt)}</span> : null}
+                    {m.lastAt ? <span className="ap-when">{ago(m.lastAt, now)}</span> : null}
                   </button>
                   <button type="button" className="ap-btn ap-quiet ap-row-msg" onClick={() => openTeammate(t, m.lane, onOpen)}>
                     Message

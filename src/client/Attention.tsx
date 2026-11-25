@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { teamAttention, teamDoneTitle, useTeam } from "./Teammates.js";
+import { onPushed, pushLive } from "./app-push.js";
 import type { Attention, Crew, Preview, RowFacts, SessionPr, Working } from "../attention.js";
 import type { NeedMark } from "../needs-rank.js";
 import { usePrs } from "./prWatch.js";
@@ -231,25 +232,31 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
       wasWorking.current = new Map((got.working ?? []).map((w) => [w.sid, w]));
     };
 
-    // Looked at every 15 seconds, every 4 while something waits on you and the window is in sight.
+    // Looked at every 15 seconds, every 4 while something waits on you and the window is in sight. Told when a session's log grows
+    // (app-push.ts), it looks then, in the background too, which is where its notices matter, and on its own only once a minute,
+    // never while the window is hidden (spec 13: an idle Home asked every 10 seconds).
     let timer: ReturnType<typeof setTimeout> | undefined;
     const next = () => {
       clearTimeout(timer);
       timer = setTimeout(async () => {
+        // Hidden: it looks as the window comes back (below).
+        if (pushLive() && document.visibilityState === "hidden") return;
         await ask();
         if (live) next();
-      }, waitingNow.current && document.visibilityState === "visible" ? WAITING_MS : EVERY_MS);
+      }, pushLive() ? 60_000 : waitingNow.current && document.visibilityState === "visible" ? WAITING_MS : EVERY_MS);
     };
     void ask().then(() => live && next());
     // A wait answered or asked here (an open session, a toast), or the window coming back into sight: look now.
     const now = () => void ask().then(() => live && next());
     const back = () => document.visibilityState === "visible" && now();
+    const offPush = onPushed("sessions", now);
     addEventListener("friday:attention", now);
     addEventListener("focus", now);
     document.addEventListener("visibilitychange", back);
     return () => {
       live = false;
       clearTimeout(timer);
+      offPush();
       removeEventListener("friday:attention", now);
       removeEventListener("focus", now);
       document.removeEventListener("visibilitychange", back);

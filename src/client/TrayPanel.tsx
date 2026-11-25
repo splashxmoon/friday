@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineTool } from "../types.js";
 import type { Need } from "../needs-rank.js";
-import { doingWords } from "../step-words.js";
+import { liveWords } from "../step-words.js";
 import { useAttention } from "./Attention.js";
 import { api, fileUrl } from "./api.js";
 import { EngineMark } from "./BrandMarks.js";
@@ -11,7 +11,7 @@ import { startSession } from "./start-session.js";
 import { loadRecents, type Identity, type RecentSession } from "./storage.js";
 import { MenuButton, relTime } from "./ui.js";
 import { isTeamSid } from "./Teammates.js";
-import { TabRing } from "./presence.js";
+import { TabRing, tickEvery } from "./presence.js";
 import { useUnread } from "./unread.js";
 import { folderName } from "./Workspace.js";
 import "./tray.css";
@@ -81,8 +81,8 @@ function TrayPanel({ identity }: { identity: Identity }) {
   const unread = useUnread();
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    // The page's one 1-second ticker, shared with every other clock and still while the window is hidden (presence.tsx).
+    return tickEvery(1000, setNow);
   }, []);
 
   // What waits on you, with its answers, as the Needs you page lists it.
@@ -221,7 +221,7 @@ function TrayPanel({ identity }: { identity: Identity }) {
           {needs.slice(0, 3).map((n) => (
             <div key={n.id} className="tp-ask">
               <div className="tp-ask-top">
-                <span className="tp-ask-title">{n.where.title}</span>
+                <span className="tp-ask-title">{n.id.startsWith("cap~") ? n.who : n.where.title}</span>
                 {n.where.sid && projectOf(n.where.sid) && <span className="tp-proj">{projectOf(n.where.sid)}</span>}
                 <span className="tp-when">{relTime(n.since)}</span>
               </div>
@@ -229,9 +229,26 @@ function TrayPanel({ identity }: { identity: Identity }) {
                 {n.text.split(/(`[^`]+`)/).map((part, i) => (part.startsWith("`") && part.endsWith("`") && part.length > 2 ? <code key={i}>{part.slice(1, -1)}</code> : <span key={i}>{part}</span>))}
               </p>
               {n.command && n.detail && <code className="tp-cmd">{n.detail.split("\n")[0]!.slice(0, 160)}</code>}
+              {/* A Captain's question is answered in your words (it passes them on to its thread); putting it away is the lesser choice. */}
+              {n.id.startsWith("cap~") ? (
+                <form
+                  className="tp-reply"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const f = new FormData(e.currentTarget).get("reply");
+                    if (typeof f === "string" && f.trim()) void answer(n, f.trim());
+                  }}
+                >
+                  <input name="reply" placeholder="Your answer" aria-label={`Answer ${n.who}`} disabled={!!busy} />
+                  <button type="submit" className="tp-btn primary" disabled={!!busy}>
+                    {busy === n.id ? <span className="spinner" /> : null}
+                    Send
+                  </button>
+                </form>
+              ) : null}
               <div className="tp-acts">
                 {n.choices.slice(0, 2).map((c, i) => (
-                  <button key={c.value} type="button" className={`tp-btn${i === 0 ? " primary" : ""}`} disabled={!!busy} onClick={() => void answer(n, c.value)}>
+                  <button key={c.value} type="button" className={`tp-btn${i === 0 && !n.id.startsWith("cap~") ? " primary" : ""}`} disabled={!!busy} onClick={() => void answer(n, c.value)}>
                     {busy === n.id && i === 0 ? <span className="spinner" /> : null}
                     {c.label}
                   </button>
@@ -259,7 +276,7 @@ function TrayPanel({ identity }: { identity: Identity }) {
             const crew = a.crews.get(w.sid);
             const busyOne = crew?.agents.find((x) => x.state === "working") ?? crew?.agents[0];
             // What it is doing this minute, in words; the tool's name before it, as the sidebar's line says it.
-            const step = busyOne?.doing ? doingWords(busyOne.doing) : busyOne?.word && busyOne.word !== "Working" ? busyOne.word : w.what;
+            const step = busyOne?.state === "working" ? liveWords(busyOne) : busyOne?.word && busyOne.word !== "Working" ? busyOne.word : w.what;
             const who = busyOne?.tool ? ENGINE_NAMES[busyOne.tool] : busyOne?.name.replace(/^[^']+'s /, "");
             return (
               <button key={w.sid} type="button" className="tp-row" onClick={() => open(w.sid)}>

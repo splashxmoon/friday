@@ -1,11 +1,11 @@
 // Lessons from T3 Code and Orca (Arun, 2026-11-10: "make ours more stable following their lead"): a sign-in check still running
 // is waited on rather than started again beside it, Antigravity is asked less often, and agy never gets a stray Gemini key.
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { agyOwnKeys, forgetLoginStatus, loginStatusCached, noteSignInStarted, toolEnv } from "../src/runner/adapters.js";
+import { forgetLoginStatus, loginStatusCached, noteSignInStarted } from "../src/runner/adapters.js";
 
 test("a slow sign-in check still running is waited on, not started a second time beside it", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "friday-steady-"));
@@ -29,29 +29,21 @@ test("a slow sign-in check still running is waited on, not started a second time
   }
 });
 
-test("agy goes without an inherited Gemini or Google key, unless its own settings pick a key provider", async () => {
-  const home = await mkdtemp(path.join(tmpdir(), "friday-agy-home-"));
-  // The home folder as Node finds it: HOME, and on Windows USERPROFILE.
-  const was = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+
+test("agy is given the Gemini API key in the environment: with it, agy runs on the key, which offers Gemini 4", async () => {
+  // Arun, 2026-11-24: "make friday pass the gemini api key to agy". An `agy models` that lists Gemini 4 Neon only when it has the key.
+  const dir = await mkdtemp(path.join(tmpdir(), "friday-agy-key-"));
+  const bin = path.join(dir, "agy.mjs");
+  await writeFile(bin, `console.log(process.env.GEMINI_API_KEY === "g-key" ? "gemini-4-neon-high\\tGemini 4 Neon (High)" : "Please sign in to view available models");\n`);
+  const was = process.env.GEMINI_API_KEY;
   try {
-    process.env.HOME = home;
-    process.env.USERPROFILE = home;
-    const env = { PATH: "/usr/bin", GEMINI_API_KEY: "g", GOOGLE_API_KEY: "k", google_api_key: "lower", GOOGLE_CLOUD_PROJECT: "p" };
-    assert.equal(agyOwnKeys(home), false, "no settings: its own Google sign-in");
-    assert.deepEqual(toolEnv("antigravity", env), { PATH: "/usr/bin", GOOGLE_CLOUD_PROJECT: "p" });
-    assert.deepEqual(toolEnv("gemini", env), env, "Gemini CLI keeps its key");
-    await mkdir(path.join(home, ".gemini", "antigravity-cli"), { recursive: true });
-    const settings = path.join(home, ".gemini", "antigravity-cli", "settings.json");
-    await writeFile(settings, JSON.stringify({ theme: "dark" }));
-    assert.equal(agyOwnKeys(home), false);
-    await writeFile(settings, JSON.stringify({ modelProvider: "gemini-api-key" }));
-    assert.equal(agyOwnKeys(home), true);
-    assert.deepEqual(toolEnv("antigravity", env), env, "a key provider of its own: its keys stay");
-    await writeFile(settings, "{ not json");
-    assert.equal(agyOwnKeys(home), true, "unreadable: may name one, so nothing is taken away");
+    process.env.GEMINI_API_KEY = "g-key";
+    forgetLoginStatus();
+    assert.equal(await loginStatusCached("antigravity", bin), true, "agy saw the key, so it lists its models");
   } finally {
-    for (const [k, v] of Object.entries(was)) if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-    await rm(home, { recursive: true, force: true });
+    if (was === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = was;
+    forgetLoginStatus();
+    await rm(dir, { recursive: true, force: true });
   }
 });

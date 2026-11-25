@@ -3,8 +3,9 @@ import net from "node:net";
 import { WebSocket, type RawData } from "ws";
 
 /**
- * This computer, reachable from anywhere through Friday's relay (reach-relay.ts; Arun, 2026-11-12, phase 2): off until the person
- * turns on "Reach from anywhere" in Settings › This computer › Your phone.
+ * This computer, reachable from anywhere through Friday's relay (reach-relay.ts; Arun, 2026-11-12, phase 2): on whenever phone access
+ * is, with no switch of its own (Arun, 2026-11-24: "get rid of anything saying reach from anywhere ... by default it can be access
+ * anywhere and over wifi too"). Only FRIDAY_RELAY=off (test servers, or someone who wants none) keeps it closed.
  *
  * On, it keeps one outbound connection to the relay, with an id and a secret made here once (no account), and for each phone that
  * reaches it opens a fresh stream back and pipes it into this computer's own phone listener (phone.ts) on 127.0.0.1. The phone runs
@@ -56,8 +57,9 @@ export class ReachHome {
     },
   ) {}
 
+  /** Always, where there is a relay: a switch set off before 2026-11-24 no longer keeps it closed. */
   async on(): Promise<boolean> {
-    return (await this.o.kv.get(KEY("on"))) === "1";
+    return true;
   }
 
   /** The id and secret, made once. The id is what a phone reaches; the secret, which never leaves here, is what claims it. */

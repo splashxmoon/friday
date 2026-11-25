@@ -73,11 +73,15 @@ export function TestProofCard({ ev, sid, by }: { ev: SessionEvent; sid: string; 
         ) : (
           <span className="tpc-counts">{runs.length} commands</span>
         )}
-        {b.by === "friday" && <span className="tpc-tag" title={who}>checked by Friday</span>}
+        {b.by === "friday" && (
+          <span className="tpc-tag" title={who}>
+            <span className="tpc-long">checked </span>by Friday
+          </span>
+        )}
         <span className="tpc-sp" />
         {tails.length > 0 && (
-          <button type="button" className="tpc-tog" aria-expanded={open} onClick={() => setOpen(!open)}>
-            Output
+          <button type="button" className="tpc-tog" aria-label="Output" aria-expanded={open} onClick={() => setOpen(!open)}>
+            <span className="tpc-long">Output</span>
             <Icon name="chevronDown" size={12} className={open ? "tpc-chev open" : "tpc-chev"} />
           </button>
         )}

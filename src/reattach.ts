@@ -1,4 +1,4 @@
-import type { LaneEngine, SessionState } from "./session/projection.js";
+import { runOf, type LaneEngine, type SessionState } from "./session/projection.js";
 import type { Role } from "./types.js";
 import { MAIN_LANE } from "./types.js";
 
@@ -38,6 +38,14 @@ export function lanesToReattach(state: SessionState, hostId: string, machine?: s
     out.push({ lane, engine: e });
   }
   return out;
+}
+
+/**
+ * Whether a session has something going: a coding tool said to be attached, or a run under way on any lane. What a restart cut
+ * off, and so what Friday looks at again as it starts (SessionStore.liveIndex, app.ts restoreAtStart).
+ */
+export function liveIn(state: SessionState): boolean {
+  return [MAIN_LANE, ...state.lanes.map((l) => l.id)].some((lane) => !!state.engines[lane]?.online || runOf(state, lane).status === "running");
 }
 
 /** The start the page's own quiet reconnect sends (Activity reconnectLane), with the server's actor token in place of the page's. */

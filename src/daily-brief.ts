@@ -48,6 +48,8 @@ export interface BriefDone {
   proof?: string;
   /** Turns it took, when more than one. */
   turns?: number;
+  /** When it finished, for the brief's line of the night (Arun, 2026-11-24: the morning brief as "the night as a line"). */
+  at?: number;
 }
 
 export type RiskKind = "error" | "limit" | "stalled" | "blocked" | "quiet" | "usage" | "goal";
@@ -57,6 +59,8 @@ export interface BriefRisk {
   text: string;
   where?: BriefWhere;
   mate?: BriefMate;
+  /** When it happened, where it happened at a moment (a turn that stopped); a standing risk (blocked, quiet) has none. */
+  at?: number;
 }
 
 export interface BriefPlan {
@@ -326,7 +330,7 @@ export function collectBrief(i: BriefInput): DailyBrief | null {
       if (b.type === "board.finished" && b.status === "done") {
         const run = runs.findLast((r) => r.lane === b.lane && r.startSeq < e.seq);
         const proof = proofs.get(b.id);
-        boardDone.push({ who: b.name, text: plainText(titles.get(b.id) ?? b.id), where: whereOf(state, { seq: e.seq, lane: b.lane }), ...(run?.files.length ? { files: run.files.length } : {}), ...(proof ? { proof } : {}) });
+        boardDone.push({ who: b.name, text: plainText(titles.get(b.id) ?? b.id), where: whereOf(state, { seq: e.seq, lane: b.lane }), ...(run?.files.length ? { files: run.files.length } : {}), ...(proof ? { proof } : {}), at: e.ts });
       }
     }
     const prOpened = events.filter((e) => e.ts >= since && e.ts <= until && e.body.type === "folder.committed" && !e.body.error && !!e.body.prUrl && e.body.prCreated);
@@ -338,7 +342,7 @@ export function collectBrief(i: BriefInput): DailyBrief | null {
       if (boardDone.length) done.push(...boardDone);
       else if (last) {
         const files = new Set(inStretch.flatMap((r) => r.files));
-        done.push({ who: agentOf(state, last.lane), text: clip(firstLine(last.said), 140), where: whereOf(state, { seq: last.saidSeq, lane: last.lane }), ...(files.size ? { files: files.size } : {}), ...(results.length > 1 ? { turns: results.length } : {}) });
+        done.push({ who: agentOf(state, last.lane), text: clip(firstLine(last.said), 140), where: whereOf(state, { seq: last.saidSeq, lane: last.lane }), ...(files.size ? { files: files.size } : {}), ...(results.length > 1 ? { turns: results.length } : {}), ...(last.endedAt !== null ? { at: last.endedAt } : {}) });
       }
       const line = done.findLast((d) => d.where.sid === state.id);
       for (const e of prOpened) {
@@ -347,14 +351,14 @@ export function collectBrief(i: BriefInput): DailyBrief | null {
         const url = e.body.prUrl;
         const merged = i.prs?.[url] === "merged" && !i.toldMerged?.has(url);
         if (line && !line.pr) line.pr = { url, state: merged ? "merged" : "opened" };
-        else done.push({ who: agentOf(state, e.lane ?? MAIN_LANE), text: clip(firstLine(e.body.message) || state.title, 140), where: whereOf(state, { seq: e.seq, lane: e.lane ?? MAIN_LANE }), pr: { url, state: merged ? "merged" : "opened" } });
+        else done.push({ who: agentOf(state, e.lane ?? MAIN_LANE), text: clip(firstLine(e.body.message) || state.title, 140), where: whereOf(state, { seq: e.seq, lane: e.lane ?? MAIN_LANE }), pr: { url, state: merged ? "merged" : "opened" }, at: e.ts });
       }
       if (prMerged.length) {
         const url = events.findLast((e) => e.body.type === "folder.committed" && !!e.body.prUrl)?.body;
         const prUrl = url?.type === "folder.committed" ? url.prUrl : undefined;
         if (prUrl && !toldPr.has(prUrl) && !i.toldMerged?.has(prUrl)) {
           toldPr.add(prUrl);
-          done.push({ who: agentOf(state, prMerged.at(-1)!.lane ?? MAIN_LANE), text: clip(state.title, 140), where: whereOf(state), pr: { url: prUrl, state: "merged" } });
+          done.push({ who: agentOf(state, prMerged.at(-1)!.lane ?? MAIN_LANE), text: clip(state.title, 140), where: whereOf(state), pr: { url: prUrl, state: "merged" }, at: prMerged.at(-1)!.ts });
         }
       }
     }
@@ -367,7 +371,7 @@ export function collectBrief(i: BriefInput): DailyBrief | null {
       const mate = crew ? mateAt(state.id, lane) : undefined;
       if (lastRun?.outcome === "error" && lastRun.endedAt !== null && lastRun.endedAt >= since && !crew) {
         const hit = limitHit(lastRun.error, lastRun.endedAt, i.tz);
-        risk.push({ kind: hit ? "limit" : "error", who, text: hit ? `hit its usage limit in ${state.title}${hit.resetsAt ? ` (resets ${clockIn(hit.resetsAt, i.tz)})` : ""}` : `stopped on an error in ${state.title}: ${clip(errorHead(lastRun.error ?? "") || "it stopped", 140)}`, where: whereOf(state, { lane, ...(lastRun.endSeq ? { seq: lastRun.endSeq } : {}) }) });
+        risk.push({ kind: hit ? "limit" : "error", who, text: hit ? `hit its usage limit in ${state.title}${hit.resetsAt ? ` (resets ${clockIn(hit.resetsAt, i.tz)})` : ""}` : `stopped on an error in ${state.title}: ${clip(errorHead(lastRun.error ?? "") || "it stopped", 140)}`, where: whereOf(state, { lane, ...(lastRun.endSeq ? { seq: lastRun.endSeq } : {}) }), at: lastRun.endedAt });
       }
       // Waiting on the person is a decision, not work under way.
       const waits = !!(state.openQuestions[lane] || state.approvals[lane] || state.asks[lane]);
@@ -420,10 +424,17 @@ export function collectBrief(i: BriefInput): DailyBrief | null {
     let crewSince = since;
     if (away?.body.type === "team.brief") {
       crewSince = Math.max(since, away.body.until);
-      if (away.body.done.length || away.body.failed.length || away.body.waiting.length) done.push({ who: "Crew", text: briefLine(away.body), where: { sid: home!.sid, title: "Away brief", kind: "crew", seq: away.seq } });
+      if (away.body.done.length || away.body.failed.length || away.body.waiting.length) done.push({ who: "Crew", text: briefLine(away.body), where: { sid: home!.sid, title: "Away brief", kind: "crew", seq: away.seq }, at: away.ts });
     }
     const tb = teamBrief(i.crew.places, i.crew.mates.map((m) => ({ id: m.id, name: m.name, lane: m.lane })), crewSince, until);
     const look = (name: string) => i.crew!.mates.find((m) => m.name === name)?.look;
+    /** When a crew line happened: its event's time in the place it came from. */
+    const atOf = (sid: string | undefined, seq: number | undefined) => {
+      if (seq === undefined) return {};
+      const p = sid ? i.crew!.places.find((x) => x.sid === sid) : i.crew!.places.find((x) => x.room === null);
+      const ts = p?.events.find((e) => e.seq === seq)?.ts;
+      return ts !== undefined ? { at: ts } : {};
+    };
     const where = (sid: string | undefined, seq?: number, lane?: string): BriefWhere => {
       const p = sid ? i.crew!.places.find((x) => x.sid === sid) : i.crew!.places.find((x) => x.room === null);
       const s = p ? bySid.get(p.sid)?.state : undefined;
@@ -434,14 +445,14 @@ export function collectBrief(i: BriefInput): DailyBrief | null {
       const ids = new Map<string, string>();
       for (const p of i.crew.places) for (const e of p.events) if (e.body.type === "board.posted") for (const t of e.body.tasks) ids.set(plainText(t.title), t.id);
       const proof = ids.get(d.title) ? proofs.get(ids.get(d.title)!) : undefined;
-      done.push({ who: d.name, text: d.title, where: where(d.sid, d.seq, d.lane), mate: { name: d.name, ...(look(d.name) ? { look: look(d.name) } : {}) }, ...(d.files?.length ? { files: d.files.length } : {}), ...(d.pr ? { pr: { url: d.pr, state: i.prs?.[d.pr] === "merged" ? "merged" : "opened" } } : {}), ...(proof ? { proof } : {}) });
+      done.push({ who: d.name, text: d.title, where: where(d.sid, d.seq, d.lane), mate: { name: d.name, ...(look(d.name) ? { look: look(d.name) } : {}) }, ...(d.files?.length ? { files: d.files.length } : {}), ...(d.pr ? { pr: { url: d.pr, state: i.prs?.[d.pr] === "merged" ? "merged" : "opened" } } : {}), ...(proof ? { proof } : {}), ...atOf(d.sid, d.seq) });
     }
     for (const f of tb.failed) {
       // Stopped by a person: their own doing, not a risk to tell them about (Arun, 2026-11-01, a brief of six "Arun Dass stopped
       // Kit on it. Kit is free again; reassign or retry it.": "design better too").
       if (/\bstopped \S+ on it\b/.test(f.why)) continue;
       const hit = limitHit(f.why, until, i.tz);
-      risk.push({ kind: hit ? "limit" : /block/i.test(f.why) || f.seq === undefined ? "blocked" : "error", who: f.name, text: hit ? `hit its usage limit on “${f.title}”` : `didn't finish “${f.title}”: ${clip(f.why, 90)}`, where: where(f.sid, f.seq, f.lane), mate: { name: f.name, ...(look(f.name) ? { look: look(f.name) } : {}) } });
+      risk.push({ kind: hit ? "limit" : /block/i.test(f.why) || f.seq === undefined ? "blocked" : "error", who: f.name, text: hit ? `hit its usage limit on “${f.title}”` : `didn't finish “${f.title}”: ${clip(f.why, 90)}`, where: where(f.sid, f.seq, f.lane), mate: { name: f.name, ...(look(f.name) ? { look: look(f.name) } : {}) }, ...atOf(f.sid, f.seq) });
     }
     // Rooms that went quiet: work left on the board, nobody on it, nothing said for a while.
     for (const p of i.crew.places) {

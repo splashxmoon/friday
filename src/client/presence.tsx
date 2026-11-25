@@ -20,7 +20,8 @@
  * (Arun, 2026-10-29: "i dont like the ring/circle thing around the claude icon in the chat... since it is already shown in the
  * header").
  */
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { runClock } from "../step-words.js";
 
 export type Presence = "working" | "needs" | "queued" | "done" | "error" | "asleep" | "idle" | "limited";
 
@@ -109,11 +110,71 @@ export function elapsed(since: number, now = Date.now()): string {
 /** The clock elapsed times count from, moved every `ms` (20s by default): counts change in place, never animated. */
 export function useNow(ms = 20_000): number {
   const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [ms]);
+  useEffect(() => tickEvery(ms, setNow), [ms]);
   return now;
+}
+
+/**
+ * One clock for everything that counts seconds where many sit side by side (the sidebar's working rows, the thread list): a single
+ * timer on the turn of each second for all of them, running only while one is on screen, so twenty working rows cost one timer, and
+ * only the time's own text redraws (Arun, 2026-11-20: "everything needs to feel like a working clock"). The time is the second it
+ * turned, so every clock on screen moves together and a read in the same second gives the same answer.
+ */
+const second = () => Math.floor(Date.now() / 1000) * 1000;
+let secNow = second();
+let secTimer: ReturnType<typeof setTimeout> | undefined;
+const secSubs = new Set<() => void>();
+const secTick = () => {
+  secNow = second();
+  for (const s of secSubs) s();
+  secTimer = setTimeout(secTick, 1000 - (Date.now() % 1000) + 5);
+};
+const onSecond = (cb: () => void) => {
+  secSubs.add(cb);
+  if (!secTimer) (secNow = second()), (secTimer = setTimeout(secTick, 1000 - (Date.now() % 1000) + 5));
+  return () => {
+    secSubs.delete(cb);
+    if (!secSubs.size) (clearTimeout(secTimer), (secTimer = undefined));
+  };
+};
+/** Now, to the second, from the one shared clock. */
+export const useSecond = (): number => useSyncExternalStore(onSecond, () => (secTimer ? secNow : second()));
+
+/** How long since `since`, counting up every second on the shared clock: "14s", "2m 14s", "1h 5m" (step-words.ts runClock). */
+export function LiveClock({ since, className, title }: { since: number; className?: string; title?: string }) {
+  const now = useSecond();
+  return (
+    <span className={className} title={title}>
+      {runClock(now - since)}
+    </span>
+  );
+}
+
+/**
+ * One ticker for every clock that moves at the same pace, so they move together in one draw rather than each on a timer of its
+ * own, and none while the window is hidden: they catch up as it comes back (spec 13: an idle Home was laid out eight times a
+ * second, clocks among the reasons). Returns how to stop.
+ */
+const tickers = new Map<number, { subs: Set<(now: number) => void>; timer: ReturnType<typeof setInterval> }>();
+export function tickEvery(ms: number, f: (now: number) => void): () => void {
+  let t = tickers.get(ms);
+  if (!t) {
+    const subs = new Set<(now: number) => void>();
+    const timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      const now = Date.now();
+      for (const s of subs) s(now);
+    }, ms);
+    tickers.set(ms, (t = { subs, timer }));
+  }
+  t.subs.add(f);
+  const back = () => document.visibilityState === "visible" && f(Date.now());
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", back);
+  return () => {
+    if (typeof document !== "undefined") document.removeEventListener("visibilitychange", back);
+    t.subs.delete(f);
+    if (t.subs.size === 0 && tickers.get(ms) === t) (clearInterval(t.timer), tickers.delete(ms));
+  };
 }
 
 // "quiet": working, but unheard a while (Sidebar.tsx crewQuiet), after those at work and before the rest.
@@ -157,21 +218,34 @@ export const reducedMotion = () => (typeof matchMedia === "function" && matchMed
 export function useFlip<T extends HTMLElement>(): RefObject<T | null> {
   const box = useRef<T | null>(null);
   const was = useRef(new Map<string, number>());
+  /** The rows' keys in order as last measured. */
+  const order = useRef<string | null>(null);
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
-    // Measured from the list's own top, so scrolling the list (or the page) never reads as a row moving.
-    const top = el.getBoundingClientRect().top;
-    const now = new Map<string, number>();
     const rows = [...el.querySelectorAll<HTMLElement>("[data-flip]")];
-    for (const r of rows) now.set(r.dataset.flip!, r.getBoundingClientRect().top - top);
-    if (!reducedMotion())
-      for (const r of rows) {
-        const before = was.current.get(r.dataset.flip!);
-        const dy = before === undefined ? 0 : before - now.get(r.dataset.flip!)!;
-        if (Math.abs(dy) > 1 && Math.abs(dy) < 600) r.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 240, easing: "cubic-bezier(.2, .8, .2, 1)" });
-      }
-    was.current = now;
+    // Measured only when the rows changed: reading where they are lays the page out there and then, and the sidebar draws on every
+    // event, so every draw was a layout of its own (spec 13: about 8 a second on a quiet Home). Its first measure, where nothing can
+    // move yet, waits until after the window has drawn: in the task that opened a session it was 17 ms of an 80 ms stall.
+    const keys = rows.map((r) => r.dataset.flip!).join("\n");
+    if (keys === order.current) return;
+    const measure = () => {
+      order.current = keys;
+      // Measured from the list's own top, so scrolling the list (or the page) never reads as a row moving.
+      const top = el.getBoundingClientRect().top;
+      const now = new Map<string, number>();
+      for (const r of rows) now.set(r.dataset.flip!, r.getBoundingClientRect().top - top);
+      if (!reducedMotion())
+        for (const r of rows) {
+          const before = was.current.get(r.dataset.flip!);
+          const dy = before === undefined ? 0 : before - now.get(r.dataset.flip!)!;
+          if (Math.abs(dy) > 1 && Math.abs(dy) < 600) r.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 240, easing: "cubic-bezier(.2, .8, .2, 1)" });
+        }
+      was.current = now;
+    };
+    if (order.current !== null) return measure();
+    const t = setTimeout(measure, 0);
+    return () => clearTimeout(t);
   });
   return box;
 }

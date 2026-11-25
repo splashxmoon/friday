@@ -8,6 +8,7 @@ import { hostApi } from "./local.js";
 import { CATEGORIES, MCP_CATALOG, type CatalogEntry, type Category } from "./mcp-catalog.js";
 import { openOutside } from "./openOutside.js";
 import type { Identity } from "./storage.js";
+import { Skeleton, SkeletonLines } from "./ui.js";
 
 /**
  * The directory of services on the MCP servers page (Arun, 2026-11-17: "i want to add support for all of these btw.... like what
@@ -500,7 +501,24 @@ function howWord(e: CatalogEntry, builtIn: boolean): string {
  * and stuff..... i want these to be like cards"), with the kinds down the left to filter by, each with its count, the ones
  * connected first, and a search over all of them.
  */
-export function Directory({ identity, servers, builtInApps, actions, onChanged }: { identity: Identity; servers: ConnectionView[]; /** The providers Friday signs in to with its own app (runner/builtin-apps.ts). */ builtInApps: string[]; /** Beside the search: the Claude Code switch and Custom server (McpServers.tsx). */ actions?: ReactNode; onChanged: () => Promise<ConnectionView[]> }) {
+export function Directory({
+  identity,
+  servers: read,
+  builtInApps,
+  actions,
+  trouble,
+  onChanged,
+}: {
+  identity: Identity;
+  /** What this computer has connected; null until it has been read, when every card would say "not connected" and then flip. */
+  servers: ConnectionView[] | null;
+  /** The providers Friday signs in to with its own app (runner/builtin-apps.ts). */ builtInApps: string[];
+  /** Beside the search: the Claude Code switch and Custom server (McpServers.tsx). */ actions?: ReactNode;
+  /** Why the list couldn't be read, with Try again: in the cards' place before it ever was, over them after. */
+  trouble?: ReactNode;
+  onChanged: () => Promise<ConnectionView[]>;
+}) {
+  const servers = read ?? [];
   const [q, setQ] = useState("");
   const [picked, setKind] = useState<Category | "" | "connected">("");
   const [open, setOpen] = useState<CatalogEntry | null>(null);
@@ -594,7 +612,37 @@ export function Directory({ identity, servers, builtInApps, actions, onChanged }
         </label>
         <div className="mdir-head-acts">{actions}</div>
       </div>
-      <div className="mdir-body">
+      {read === null ? (
+        // Until this computer says what it has connected: the page in its own shape, the kinds down the side and cards in their
+        // grid, so nothing says "not connected" a moment before it says Connected. Or, if it couldn't be read, why, in their place.
+        <div className="mdir-body">
+          <div className="mdir-filters mdir-skel-filters" aria-hidden="true">
+            {[58, 74, 0, 92, 80, 66, 98, 72].map((w, i) => (w ? <Skeleton key={i} w={`${w}%`} h={12} className="mdir-skel-filter" /> : <span key={i} className="mdir-sep" />))}
+          </div>
+          {trouble ?? (
+            <div className="mdir-list" role="status" aria-label="Reading your plugins">
+              <section className="mdir-group" aria-hidden="true">
+                <Skeleton w={132} h={14} className="mdir-skel-head" />
+                <ul className="mdir-cards">
+                  {Array.from({ length: 9 }, (_, i) => (
+                    <li key={i}>
+                      <span className="mdir-card mdir-card-skel">
+                        <span className="mdir-card-top">
+                          <Skeleton w={34} h={34} r={9} />
+                          <Skeleton w={52} h={18} r={999} />
+                        </span>
+                        <Skeleton w={`${44 + ((i * 13) % 30)}%`} h={12} />
+                        <SkeletonLines lines={2} gap={6} />
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            </div>
+          )}
+        </div>
+      ) : (
+      <div className="mdir-body mdir-landed">
         <nav className="mdir-filters" aria-label="Kinds of service">
           {filter("", "All", catalog.filter(matches).length)}
           {connected.length + own.length > 0 && filter("connected", "Connected", connected.filter(matches).length + own.filter((s) => !needle || `${s.name} ${lineOf(s)}`.toLowerCase().includes(needle)).length)}
@@ -602,6 +650,7 @@ export function Directory({ identity, servers, builtInApps, actions, onChanged }
           {CATEGORIES.filter((c) => catalog.some((e) => e.category === c)).map((c) => filter(c, c, catalog.filter((e) => e.category === c && matches(e)).length))}
         </nav>
         <div className="mdir-list">
+          {trouble}
           {ownShown.length > 0 && (
             <section className="mdir-group" aria-label="Your own servers">
               <h3 className="mdir-group-head">
@@ -627,6 +676,7 @@ export function Directory({ identity, servers, builtInApps, actions, onChanged }
           {!shownCount && <p className="mdir-empty">No service matches “{q.trim()}”. Paste its address or command below instead.</p>}
         </div>
       </div>
+      )}
       {ownOpen && <OwnSheet identity={identity} server={ownOpen} onClose={() => setOpenOwn("")} onChanged={onChanged} />}
       {open && <ServiceSheet identity={identity} entry={open} servers={servers} builtIn={!!open.needsClient && builtInApps.includes(open.needsClient)} onClose={() => setOpen(null)} onChanged={onChanged} />}
     </section>

@@ -4,9 +4,11 @@
  * (TeamBrief.tsx, teammates.css .tm-brief-*), each a press from the session or room it is about; a teammate's line wears its face.
  */
 import { useEffect, useState, type ReactNode } from "react";
-import { AlertTriangleIcon, ArrowRightIcon, CheckIcon, ClockIcon, GitMergeIcon, GitPullRequestIcon, HandIcon, ShieldCheckIcon } from "lucide-react";
-import type { BriefSettings, BriefWhere, DailyBrief } from "../daily-brief.js";
+import { AlertTriangleIcon, ArrowRightIcon, CheckIcon, ClockIcon, GitMergeIcon, GitPullRequestIcon, GlobeIcon, HandIcon, MinusIcon, MoonIcon, PlusIcon, ShieldCheckIcon, SunIcon } from "lucide-react";
+import type { BriefDone, BriefSettings, BriefWhere, DailyBrief } from "../daily-brief.js";
 import { shortTokens } from "../tool-usage.js";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { api } from "./api.js";
 import { focusAgent } from "./agentFocus.js";
@@ -264,6 +266,183 @@ export function BriefView({ brief: b, max = 12, card = false }: { brief: DailyBr
   );
 }
 
+/** What goes with a finished line: its pull request, the check that shows it works, and how many files. */
+function doneMeta(d: BriefDone): ReactNode {
+  const n = d.pr && /\/pull\/(\d+)/.exec(d.pr.url)?.[1];
+  if (!d.pr && !d.proof && !d.files) return null;
+  return (
+    <>
+      {d.pr && (
+        <a className={`db-pr${d.pr.state === "merged" ? " merged" : ""}`} href={d.pr.url} target="_blank" rel="noreferrer" title={`Pull request ${d.pr.state}`}>
+          {d.pr.state === "merged" ? <GitMergeIcon className="size-3" /> : <GitPullRequestIcon className="size-3" />}
+          {n ? `#${n}` : "PR"}
+        </a>
+      )}
+      {d.proof && (
+        <span className="db-proof" title={`Checked: ${d.proof}`} aria-label="Checked">
+          <ShieldCheckIcon className="size-3.5" />
+        </span>
+      )}
+      {!!d.files && <span className="dn-files">{d.files} file{d.files === 1 ? "" : "s"}</span>}
+    </>
+  );
+}
+
+/** How a plan line reads in the night line, where its time already sits above it. */
+const NEXT_VERB: Record<DailyBrief["plan"][number]["source"], string> = { running: "is on ", board: "is on ", queued: "has next: ", checkin: "checks in: ", wake: "picks up: ", left: "", goal: "" };
+
+/** "3 landed, 1 question for you": the stretch in a few words, from the counts. */
+function nightTitle(b: DailyBrief): string {
+  const n = b.done.length;
+  const q = b.decisions.count;
+  const r = b.risk.length;
+  const parts = [n ? `${n} landed` : "Nothing landed"];
+  if (q) parts.push(`${q} ${q === 1 ? "question" : "questions"} for you`);
+  else if (r) parts.push(`${r} at risk`);
+  return parts.join(", ");
+}
+
+/** A line's who and what, its teammate's face before it, a press from where it happened. */
+function TickBody({ b, face, who, text, where }: { b: DailyBrief; face?: { name: string; look?: string }; who?: string; text: string; where?: BriefWhere }) {
+  const inner = (
+    <>
+      {face && <Face seed={face.look ?? face.name} size={18} />}
+      <span className="dn-words">
+        {who && <b>{who}</b>} {tidy(text)}
+      </span>
+    </>
+  );
+  return where?.sid ? (
+    <button type="button" className="dn-tx" onClick={() => open(b, where)} title={text}>
+      {inner}
+    </button>
+  ) : (
+    <span className="dn-tx" title={text}>
+      {inner}
+    </span>
+  );
+}
+
+/**
+ * The brief in the panel, as the night on a line (Arun, 2026-11-24, choosing C of the mocks in Friday Work HQ/product/designs/
+ * 2026-11-24-morning-brief: "i like C mornging brefi design"): what landed and what stopped, in the order it happened with its
+ * time, down to a Now marker; what waits on the person at Now, with Answer; today's plan after it as dashed stops; usage last.
+ */
+function NightView({ brief: b }: { brief: DailyBrief }) {
+  const room = (w?: BriefWhere) => (w && w.kind !== "crew" ? w.title : undefined);
+  type Tick = { key: string; at?: number; tone: "done" | "risk"; face?: { name: string; look?: string }; who?: string; text: string; where?: BriefWhere; meta?: ReactNode; room?: string };
+  const past: Tick[] = [
+    ...b.done.map((d, i): Tick => ({ key: `d${i}`, tone: "done", who: d.who, text: d.text, where: d.where, ...(d.at !== undefined ? { at: d.at } : {}), ...(d.mate ? { face: d.mate } : {}), ...((m) => (m ? { meta: m } : {}))(doneMeta(d)), ...((w) => (w && w !== d.text ? { room: w } : {}))(room(d.where)) })),
+    ...b.risk.flatMap((r, i): Tick[] => (r.at !== undefined ? [{ key: `r${i}`, at: r.at, tone: "risk", text: r.text, ...(r.who ? { who: r.who } : {}), ...(r.where ? { where: r.where } : {}), ...(r.mate ? { face: r.mate } : {}) }] : [])),
+  ].sort((x, y) => (x.at ?? b.since) - (y.at ?? b.since));
+  const standing = b.risk.filter((r) => r.at === undefined);
+  const MAX = 14;
+  const earlier = Math.max(0, past.length - MAX);
+  const fresh = Date.now() - b.until < 30 * 60_000;
+  const crossed = dayWord(b.since, b.tz) !== dayWord(b.until, b.tz);
+  const nothing = !past.length && !standing.length && !b.decisions.count && !b.plan.length;
+  return (
+    <>
+      <header className="dn-head">
+        <div className="dn-kicker">
+          {b.kind === "evening" ? <MoonIcon className="size-3.5" /> : <SunIcon className="size-3.5" />}
+          {TITLE[b.kind]} · {new Intl.DateTimeFormat(undefined, { weekday: "long", timeZone: b.tz }).format(b.until)}
+        </div>
+        <SheetTitle className="dn-title">{nightTitle(b)}</SheetTitle>
+        <SheetDescription className="dn-sub">
+          From {clock(b.since, b.tz)}
+          {crossed ? " yesterday" : ""} to {fresh ? "now" : clock(b.until, b.tz)}
+          {b.plan.length ? ", then what's next." : "."}
+        </SheetDescription>
+      </header>
+      <div className="db-sheet-body dn-body">
+        {nothing ? (
+          <p className="tm-brief-quiet">No work finished, nothing at risk and nothing waiting on you.</p>
+        ) : (
+          <ol className="dn-line">
+            {earlier > 0 && <li className="dn-earlier">{earlier} earlier</li>}
+            {past.slice(earlier).map((t) => (
+              <li key={t.key} className="dn-tick" data-tone={t.tone}>
+                <span className="dn-dot" aria-hidden="true" />
+                {t.at !== undefined && <span className="dn-when">{clock(t.at, b.tz)}</span>}
+                <TickBody b={b} text={t.text} {...(t.face ? { face: t.face } : {})} {...(t.who ? { who: t.who } : {})} {...(t.where ? { where: t.where } : {})} />
+                {(t.meta || t.room) && (
+                  <span className="dn-meta">
+                    {t.meta}
+                    {t.room && <span className="dn-room">{t.room}</span>}
+                  </span>
+                )}
+              </li>
+            ))}
+            <li className="dn-now" aria-label={fresh ? "Now" : `At ${clock(b.until, b.tz)}`}>
+              <span>{fresh ? `Now · ${clock(b.until, b.tz)}` : clock(b.until, b.tz)}</span>
+            </li>
+            {standing.map((r, i) => (
+              <li key={`s${i}`} className="dn-tick" data-tone="risk">
+                <span className="dn-dot" aria-hidden="true" />
+                <span className="dn-when">Still open</span>
+                <TickBody b={b} text={r.text} {...(r.mate ? { face: r.mate } : {})} {...(r.who ? { who: r.who } : {})} {...(r.where ? { where: r.where } : {})} />
+              </li>
+            ))}
+            {b.decisions.top.map((x) => {
+              const w: BriefWhere = { sid: x.sid, title: x.title, kind: "code", ...(x.lane ? { lane: x.lane } : {}) };
+              return (
+                <li key={`${x.sid}:${x.seq}`} className="dn-wait">
+                  <div className="dn-wait-who">
+                    <HandIcon className="size-3.5" />
+                    <span>
+                      {x.agent && <b>{x.agent}</b>} waits on you · {x.title}
+                    </span>
+                  </div>
+                  <p>{tidy(x.text)}</p>
+                  <Button type="button" size="sm" onClick={() => open(b, w)}>
+                    Answer
+                  </Button>
+                </li>
+              );
+            })}
+            {b.decisions.count > b.decisions.top.length && <li className="dn-earlier">+{b.decisions.count - b.decisions.top.length} more in Needs you</li>}
+            {b.plan.slice(0, 8).map((p, i) => (
+              <li key={`p${i}`} className="dn-tick" data-tone="next">
+                <span className="dn-dot" aria-hidden="true" />
+                <span className="dn-when">{p.at ?? (p.source === "running" || p.source === "board" ? "On it now" : "Next")}</span>
+                <TickBody b={b} text={`${NEXT_VERB[p.source]}${p.text}`} who={p.who} {...(p.mate ? { face: p.mate } : {})} {...(p.where ? { where: p.where } : {})} />
+              </li>
+            ))}
+            {b.plan.length > 8 && <li className="dn-earlier">+{b.plan.length - 8} more lined up</li>}
+          </ol>
+        )}
+        {b.usage.some((u) => u.windows.length) && (
+          <div className="dn-usage">
+            {b.usage
+              .filter((u) => u.windows.length)
+              .map((u) => (
+                <div key={u.tool} className="dn-usage-tool">
+                  <span className="dn-usage-name">
+                    {u.name}
+                    {u.tokens > 0 && <span> · {shortTokens(u.tokens)} tokens today</span>}
+                  </span>
+                  <div className="dn-usage-row">
+                    {u.windows.map((w) => (
+                      <div key={w.label} className="dn-meter" data-level={w.used >= 100 ? "full" : w.used >= 80 ? "high" : undefined} title={w.resetsAt ? `Resets ${clock(w.resetsAt * 1000, b.tz)}` : undefined}>
+                        <span>
+                          {w.label.charAt(0).toUpperCase() + w.label.slice(1)} <b>{w.used}%</b>
+                        </span>
+                        <i aria-hidden="true">
+                          <i style={{ width: `${Math.min(100, Math.max(0, w.used))}%` }} />
+                        </i>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 /** On the home screen: the latest scheduled brief while it is fresh, until it is put away. */
 export function DailyBriefCard() {
   const { brief } = useLatest();
@@ -288,32 +467,94 @@ export function DailyBriefCard() {
   );
 }
 
-/** Its times: morning and evening, each on or off, in the person's own zone. */
+/** "08:30" as the person's clock says it, "8:30 AM"; `short` leaves off AM and PM, for the picker's grid. */
+function timeWord(hhmm: string, short = false): string {
+  const [h = 0, m = 0] = hhmm.split(":").map(Number);
+  const parts = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).formatToParts(new Date(2000, 0, 1, h, m));
+  return parts
+    .filter((p) => !short || (p.type !== "dayPeriod" && !(p.type === "literal" && /^\s+$/.test(p.value))))
+    .map((p) => p.value)
+    .join("")
+    .trim();
+}
+const stepTime = (hhmm: string, by: number) => {
+  const [h = 0, m = 0] = hhmm.split(":").map(Number);
+  const t = (((h * 60 + m + by) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+};
+const halfHours = (from: number) => Array.from({ length: 12 }, (_, i) => `${String(from + Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`);
+const city = (zone: string) => (zone.split("/").pop() ?? zone).replace(/_/g, " ");
+
+/**
+ * One brief's time as a chip, and Friday's own picker for it (Arun, 2026-11-24: "no native controls"): the browser's time box gave
+ * every platform a different control. The switch, 15-minute steps, the common times and the time zone, in one popover.
+ */
+function TimeChip({ kind, value, zone, onSave }: { kind: "morning" | "evening"; value: string | null; zone: string; onSave: (patch: Partial<BriefSettings>) => void }) {
+  const fallback = kind === "morning" ? "08:30" : "18:00";
+  const label = kind === "morning" ? "Morning brief" : "Evening wrap-up";
+  const Icon = kind === "morning" ? SunIcon : MoonIcon;
+  const at = value ?? fallback;
+  const here = tz();
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" className="dn-chip" data-off={value ? undefined : "true"} aria-label={`${label}: ${value ? timeWord(value) : "off"}`}>
+          <Icon className="size-3" />
+          {value ? timeWord(value) : "Off"}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" side="top" className="tm-pop dn-picker">
+        <div className="dn-picker-head">
+          <Icon className="size-3.5" />
+          <b>{label}</b>
+          <Switch on={!!value} onChange={(on) => onSave({ [kind]: on ? at : null })} label={label} />
+        </div>
+        <div className="dn-picker-step" data-off={value ? undefined : "true"}>
+          <button type="button" aria-label="15 minutes earlier" disabled={!value} onClick={() => onSave({ [kind]: stepTime(at, -15) })}>
+            <MinusIcon className="size-3.5" />
+          </button>
+          <span className="dn-picker-big">{timeWord(at)}</span>
+          <button type="button" aria-label="15 minutes later" disabled={!value} onClick={() => onSave({ [kind]: stepTime(at, 15) })}>
+            <PlusIcon className="size-3.5" />
+          </button>
+        </div>
+        <div className="dn-picker-grid" role="group" aria-label="Common times">
+          {halfHours(kind === "morning" ? 6 : 16).map((t) => (
+            <button key={t} type="button" aria-pressed={value === t} aria-label={timeWord(t)} onClick={() => onSave({ [kind]: t })}>
+              {timeWord(t, true)}
+            </button>
+          ))}
+        </div>
+        <div className="dn-picker-zone">
+          <GlobeIcon className="size-3" />
+          {city(zone)} time
+          {zone !== here && (
+            <button type="button" className="link-btn" onClick={() => onSave({ tz: here })}>
+              Use {city(here)}
+            </button>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Its times: morning and evening, each a chip that opens the picker, in the person's own zone. */
 function Schedule({ identity, settings, onChange }: { identity: Identity; settings: BriefSettings; onChange: (s: BriefSettings) => void }) {
   const [err, setErr] = useState("");
   const save = (patch: Partial<BriefSettings>) =>
-    api<{ settings: BriefSettings }>(identity, "/api/brief/settings", { method: "PUT", body: JSON.stringify(patch) })
+    void api<{ settings: BriefSettings }>(identity, "/api/brief/settings", { method: "PUT", body: JSON.stringify(patch) })
       .then((r) => (setErr(""), onChange(r.settings), setLatest({ ...latest, settings: r.settings })))
       .catch((e: Error) => setErr(e.message));
-  const row = (kind: "morning" | "evening", label: string, fallback: string) => (
-    <div className="db-time" data-off={settings[kind] ? undefined : "true"}>
-      <span className="db-time-label">{label}</span>
-      <input type="time" value={settings[kind] ?? fallback} disabled={!settings[kind]} onChange={(e) => e.target.value && void save({ [kind]: e.target.value })} aria-label={`${label} brief time`} />
-      <Switch on={!!settings[kind]} onChange={(on) => void save({ [kind]: on ? fallback : null })} label={`${label} brief`} />
-    </div>
-  );
   return (
-    <footer className="db-schedule">
-      {row("morning", "Morning", "08:30")}
-      {row("evening", "Evening", "18:00")}
-      <p className="db-zone">
-        Times in {settings.tz.replace(/_/g, " ")}
-        {settings.tz !== tz() && (
-          <button type="button" className="link-btn" onClick={() => void save({ tz: tz() })}>
-            Use {tz().replace(/_/g, " ")}
-          </button>
-        )}
-      </p>
+    <footer className="db-schedule dn-foot">
+      <div className="dn-foot-row">
+        <span className="dn-foot-word">Arrives</span>
+        <TimeChip kind="morning" value={settings.morning} zone={settings.tz} onSave={save} />
+        <span className="dn-foot-word">and</span>
+        <TimeChip kind="evening" value={settings.evening} zone={settings.tz} onSave={save} />
+        <span className="dn-foot-zone">{city(settings.tz)}</span>
+      </div>
       {err && <p className="error small">{err}</p>}
     </footer>
   );
@@ -406,12 +647,18 @@ export function DailyBriefHost({ identity }: { identity: Identity }) {
       )}
       <Sheet open={!!panel} onOpenChange={(o) => !o && setPanel(null)}>
         {/* Focus on the panel itself, not its first control: the Enter that sent /brief lifts on a switch otherwise. */}
-        <SheetContent side="right" className="db-sheet" tabIndex={-1} onOpenAutoFocus={(e) => (e.preventDefault(), (e.currentTarget as HTMLElement).focus())}>
-          <header className="db-sheet-head">
-            <SheetTitle>{b ? TITLE[b.kind] : "Your brief"}</SheetTitle>
-            <SheetDescription>{b ? `${sinceWord(b)} · ${b.headline}` : panel?.loading ? "Reading your sessions…" : panel?.since ? `Nothing new since ${clock(panel.since, zone)}.` : "Nothing new today."}</SheetDescription>
-          </header>
-          <div className="db-sheet-body">{b ? <BriefView brief={b} /> : !panel?.loading && <p className="tm-brief-quiet">No work finished, nothing at risk and nothing waiting on you.</p>}</div>
+        <SheetContent side="right" className={`db-sheet${b ? " dn" : ""}`} tabIndex={-1} onOpenAutoFocus={(e) => (e.preventDefault(), (e.currentTarget as HTMLElement).focus())}>
+          {b ? (
+            <NightView brief={b} />
+          ) : (
+            <>
+              <header className="db-sheet-head">
+                <SheetTitle>Your brief</SheetTitle>
+                <SheetDescription>{panel?.loading ? "Reading your sessions…" : panel?.since ? `Nothing new since ${clock(panel.since, zone)}.` : "Nothing new today."}</SheetDescription>
+              </header>
+              <div className="db-sheet-body">{!panel?.loading && <p className="tm-brief-quiet">No work finished, nothing at risk and nothing waiting on you.</p>}</div>
+            </>
+          )}
           {settings && <Schedule identity={identity} settings={settings} onChange={setSettings} />}
         </SheetContent>
       </Sheet>

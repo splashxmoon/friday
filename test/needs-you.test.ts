@@ -305,3 +305,17 @@ test("a crew workflow waiting at Your OK is on the queue, and answering it there
   assert.ok((await q.answer(ME, "w1", items[0]!.id, "Not yet: the tests are red")).ok);
   assert.deepEqual(said, [["w1", "r1", true, ""], ["w1", "r1", false, "Not yet: the tests are red"]]);
 });
+
+test("a project Captain's question is on the queue (spec 14, P3): answered in your words through the Captain, or put away; its id names no session", async () => {
+  const said: unknown[] = [];
+  const asks = [{ id: "mgr_abc", at: 1_700, text: "Refund to the card or as credit?", project: "shop", sid: "s9" }];
+  const { q } = queue([], { captains: { asks: async () => asks, answer: async (...a: unknown[]) => void said.push(a) } });
+  const items = await q.list(ME, "w1");
+  assert.equal(items.length, 1);
+  const n = items[0]!;
+  assert.deepEqual([n.id, n.kind, n.who, n.where.title, n.where.sid, n.text, n.free], ["cap~mgr_abc~1700", "crew", "shop's Captain", "shop", "s9", "Refund to the card or as credit?", true]);
+  assert.deepEqual(n.choices.map((c) => c.label), ["Put away"]);
+  assert.ok((await q.answer(ME, "w1", n.id, "Card, always")).ok);
+  assert.ok((await q.answer(ME, "w1", n.id, "away")).ok);
+  assert.deepEqual(said, [["mgr_abc", 1_700, "Card, always"], ["mgr_abc", 1_700, null]]);
+});

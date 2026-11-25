@@ -329,7 +329,11 @@ export function backdropHeaders(id: string, file: string, origin: string): Recor
  *   DELETE /api/local/backdrops/<id>          into Friday's trash
  * Answers false for a path it doesn't have.
  */
-export async function backdropsHttp(store: BackdropStore, req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<boolean> {
+/**
+ * `also`: the events stream is the one this computer's page keeps open, so what else changed for the page goes on it too, as
+ * `event: changed` with what changed (app.ts appChanged; spec 13): told, the page reads its lists then, not every few seconds.
+ */
+export async function backdropsHttp(store: BackdropStore, req: http.IncomingMessage, res: http.ServerResponse, url: URL, also?: (tell: (what: string) => void) => () => void): Promise<boolean> {
   const p = url.pathname;
   if (p !== "/api/local/backdrops" && !p.startsWith("/api/local/backdrops/")) return false;
   const send = (status: number, body: unknown) => {
@@ -342,9 +346,10 @@ export async function backdropsHttp(store: BackdropStore, req: http.IncomingMess
     res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store, no-transform", Connection: "keep-alive" });
     res.write(`retry: 3000\ndata: ${store.version}\n\n`);
     const off = store.onChange((v) => void res.write(`data: ${v}\n\n`));
+    const offAlso = also?.((what) => void res.write(`event: changed\ndata: ${what}\n\n`));
     const keep = setInterval(() => void res.write(": still here\n\n"), 45_000);
     keep.unref?.();
-    const end = () => (off(), clearInterval(keep));
+    const end = () => (off(), offAlso?.(), clearInterval(keep));
     req.on("close", end);
     res.on("close", end);
     return true;

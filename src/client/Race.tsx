@@ -11,7 +11,8 @@ import { DiffView } from "./DiffView.js";
 import { hostApi, useMachine } from "./local.js";
 import { ShipDialog } from "./ShipLazy.js";
 import type { Identity } from "./storage.js";
-import { Picker, useDismiss } from "./ui.js";
+import { Picker, SkeletonLines, useDismiss } from "./ui.js";
+import { useFullFiles } from "./patchSource.js";
 import type { Send } from "./useSession.js";
 
 /**
@@ -351,6 +352,10 @@ export function RaceCard({ state, me, events, identity, sid, invite, send }: { s
  */
 function RaceChanges({ racers }: { racers: { name: string; files: DiffFile[] }[] }) {
   const [open, setOpen] = useState<string | null>(null);
+  // The open file's versions, fetched as it opens: the session came with its change sets by name and counts (patchSource.ts).
+  const openFiles = open ? racers.flatMap((r) => r.files.filter((f) => f.path === open)) : [];
+  const opened = useFullFiles(openFiles, !!open);
+  const textOf = (f: DiffFile) => opened.files[openFiles.indexOf(f)]?.patch || f.patch;
   const names = racers.map((r) => r.name.slice(RACE_PREFIX.length));
   const byPath = new Map<string, (DiffFile | undefined)[]>();
   racers.forEach((r, i) => {
@@ -370,7 +375,17 @@ function RaceChanges({ racers }: { racers: { name: string; files: DiffFile[] }[]
     return `${did.slice(0, -1).join(", ")} and ${did.at(-1)} changed it`;
   };
   const side = (f: DiffFile | undefined, name: string) =>
-    f ? <DiffView path={f.path} lines={patchLines(f.patch)} defaultOpen maxHeight={360} {...(f.truncated ? { status: "cut short" } : {})} /> : <div className="race-diff-none muted small">{name} left this file alone.</div>;
+    f ? (
+      !textOf(f) && opened.loading ? (
+        <div className="race-diff-none" aria-label="Fetching the change">
+          <SkeletonLines lines={4} />
+        </div>
+      ) : (
+        <DiffView path={f.path} lines={patchLines(textOf(f))} defaultOpen maxHeight={360} {...(f.truncated ? { status: "cut short" } : {})} />
+      )
+    ) : (
+      <div className="race-diff-none muted small">{name} left this file alone.</div>
+    );
   return (
     <div className="race-changes">
       <div className="race-changes-head">

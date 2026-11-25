@@ -126,6 +126,13 @@ export type Thinking = "fast" | "balanced" | "deep";
 export interface SessionOptions {
   /** Off by default: the code in front of the agent is the source of truth. */
   webSearch: boolean;
+  /** A project Manager's own session (managers.ts): never listed to the project's agents as one of its threads. */
+  manager?: string;
+  /**
+   * A big task a project Captain split into parts (spec 14, Run): its hub plan is approved by the Captain, and its parts are brought
+   * together in the session's own copy and left there uncommitted for the person to review and ship (hubs.ts finish).
+   */
+  byCaptain?: string;
   /** The agent may read and plan, but may not change anything until the driver approves its plan. */
   planFirst: boolean;
   /** How many teammates other than the approver must sign off on the plan first. 0 is the driver's call alone. */

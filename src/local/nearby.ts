@@ -62,6 +62,8 @@ function broadcasts(): string[] {
 export class Nearby {
   private sock: dgram.Socket | null = null;
   private offers = new Map<string, NearbyOffer>();
+  /** An offer came: this computer's page is told, rather than asking every few seconds (app.ts, spec 13). */
+  onChange: (() => void) | null = null;
 
   constructor(
     private o: {
@@ -126,6 +128,7 @@ export class Nearby {
       const name = String(m.name ?? parsed.hub.name).replace(/\s+/g, " ").slice(0, 60);
       this.offers.set(m.id, { from: m.id, name, check: checkNumber(parsed.hub.fingerprint), until: Date.now() + 10 * 60_000, link: m.link.slice(0, 2000), address: from.address });
       this.o.log?.(`nearby: ${name} offered to link from ${from.address}`);
+      this.onChange?.();
     }
   }
 

@@ -131,6 +131,9 @@ export const SECTIONS: SectionDef[] = [
     blurb: "The computer your coding agents run on, and keeping it awake while they do.",
     keywords: "computer machine connect connected link folder runner keep awake sleep",
   },
+  // The Friday iPhone app (PhoneSettings.tsx): a section of its own since 2026-11-24 (Arun: "create a new section in the settings page
+  // specifically for phone"), was a group in This computer. The open-source edition's: the phone connects to this computer's Friday.
+  // Arun's own build only for now (2026-11-25: "leave all of the phone stuff out for now… there is more work we need to do").
   // Your other computers, linked to this one's Friday (Computers.tsx): only on this computer's Friday.
   {
     id: "other-computers",
@@ -189,7 +192,7 @@ export const SECTIONS: SectionDef[] = [
     group: "Help",
     icon: "refresh",
     blurb: "Which version you have, newer ones, and what each one changed.",
-    keywords: "version update updates release notes what's new whats changelog desktop app restart download",
+    keywords: "version update updates release notes what's new whats changelog desktop app restart download diagnostics log crash bug report",
   },
   {
     id: "help",

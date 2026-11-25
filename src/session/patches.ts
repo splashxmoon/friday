@@ -15,6 +15,8 @@ import type { SessionState } from "./projection.js";
  *   log sees whole patches, and a hundred copies of one in memory cost one. A log from before this is folded the same way.
  * - Sent: a page opening a session gets the latest change set of each lane whole and the older ones by name and counts
  *   (lightLog); a file's text comes when it is opened, by the seq in `later` (GET /api/sessions/:sid/diff).
+ * - The desktop app is sent every change set by name and counts, the latest too, in its log and in the state (lightDiffs): in a
+ *   20,000-event session the latest ones were 1.5 MB of a 1.9 MB opening message, and the page stalled reading it (spec 13).
  */
 
 type DiffEvent = SessionEvent & { body: Extract<SessionEvent["body"], { type: "agent.diff" }> };
@@ -97,12 +99,21 @@ export function lightLog(events: SessionEvent[]): SessionEvent[] {
  * lightLog for one event at a time, judged against the whole log: for sending part of a long log (the hello's newest events,
  * the rest in pieces) without going over all of it to make what isn't sent.
  */
-export function lightener(events: SessionEvent[]): (e: SessionEvent) => SessionEvent {
+export function lightener(events: SessionEvent[], all = false): (e: SessionEvent) => SessionEvent {
   const latest = new Map<string, number>();
-  for (const e of events) if (isDiff(e)) latest.set(e.lane ?? MAIN_LANE, e.seq);
+  if (!all) for (const e of events) if (isDiff(e)) latest.set(e.lane ?? MAIN_LANE, e.seq);
   const keep = new Set(latest.values());
-  return (e) =>
-    !isDiff(e) || keep.has(e.seq) || !e.body.files.some((f) => f.patch)
-      ? e
-      : { ...e, body: { ...e.body, files: e.body.files.map((f) => (f.patch ? { ...f, patch: "", later: originOf(f, e.seq) } : f)) } };
+  return (e) => (!isDiff(e) || keep.has(e.seq) || !e.body.files.some((f) => f.patch) ? e : { ...e, body: { ...e.body, files: lightFiles(e.body.files, e.seq) } });
+}
+
+/** A change set's files by name and counts: each with text gets the seq to fetch it by (`later`) in its place. */
+export function lightFiles(files: DiffFile[], seq: number): DiffFile[] {
+  return files.map((f) => (f.patch ? { ...f, patch: "", later: originOf(f, seq) } : f));
+}
+
+/** The state's change sets as the desktop app is sent them: names and counts, every file's text fetched as it is needed. */
+export function lightDiffs(diffs: SessionState["diffs"]): SessionState["diffs"] {
+  const out: SessionState["diffs"] = {};
+  for (const [lane, d] of Object.entries(diffs)) out[lane] = d.files.some((f) => f.patch) ? { ...d, files: lightFiles(d.files, d.seq) } : d;
+  return out;
 }

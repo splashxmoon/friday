@@ -60,6 +60,11 @@
 .dd-building-note { margin: 0 0 36px; color: var(--text-muted); font-size: 12.5px; line-height: 18px; }
 @media (max-width: 760px) { .dd-steps li { grid-template-columns: 22px 1fr; } .dd-step-said { grid-column: 2; padding-bottom: 8px; text-align: left; } }
 .dd-error { margin: 0; color: var(--red); font-size: 13px; line-height: 18px; }
+/* A repo or the list that couldn't be read: why and Try again, where the pages would be. */
+.dd-failed { padding-top: 56px; }
+/* Opening a repo (Repo, before it is read): its name in the header, in the placeholder's grey. */
+.dd-skel-name { flex: 0 1 200px; }
+.dd-skel-name > span { height: 14px; border-radius: 6px; }
 .dd-quiet { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; color: var(--text-muted); font-size: 12px; line-height: 16px; }
 .dd-count { color: var(--text-muted); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
 .dd-mark { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); }

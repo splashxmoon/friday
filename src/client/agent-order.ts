@@ -37,17 +37,24 @@ export function finishingOrder<T>(items: T[], info: (t: T) => OrderInfo, last: (
     if (x.kind === "other") place[i] = x.seq;
     else if (x.kind === "run") place[i] = x.ended ?? (x.live ? Infinity : last(items[i]!));
   });
-  infos.forEach((x, i) => {
-    if (x.kind !== "ask") return;
+  // Each agent's next run and last run, found in one pass each way: looked for from the start for every message, a long session's
+  // feed did millions of steps on every event (spec 13, Arun 2026-11-24: "Go all out and fix these problems").
+  const nextRun = new Map<string, number>();
+  for (let i = infos.length - 1; i >= 0; i--) {
+    const x = infos[i]!;
     // The run of the same agent that came after it, which is the one that took it up.
-    const next = infos.findIndex((y, j) => j > i && y.kind === "run" && y.lane === x.lane);
-    place[i] = next !== -1 ? place[next]! : working.has(x.lane) ? Infinity : x.seq;
-  });
+    if (x.kind === "ask") {
+      const next = nextRun.get(x.lane);
+      place[i] = next !== undefined ? place[next]! : working.has(x.lane) ? Infinity : x.seq;
+    } else if (x.kind === "run") nextRun.set(x.lane, i);
+  }
+  const lastRun = new Map<string, number>();
   infos.forEach((x, i) => {
+    if (x.kind === "run") lastRun.set(x.lane, i);
     if (x.kind !== "after") return;
     // The same agent's run before it: placed with it, and after it, since the sort keeps the log's order among equals.
-    const run = infos.findLastIndex((y, j) => j < i && y.kind === "run" && y.lane === x.lane);
-    place[i] = run !== -1 ? place[run]! : x.seq;
+    const run = lastRun.get(x.lane);
+    place[i] = run !== undefined ? place[run]! : x.seq;
   });
   return items
     .map((it, i) => ({ it, i, at: place[i]! }))

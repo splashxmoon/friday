@@ -17,14 +17,14 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.4.1",
-  title: "Backdrops and proof",
-  summary: "Put a scene behind Friday, see finished work proven with a clip or its tests, and find what's worth doing on Home.",
+  version: "0.4.3",
+  title: "Captains",
+  summary: "A Captain minds a project's coding sessions for you: it keeps work going, checks what's finished, and brings you only what needs you.",
   items: [
-    { icon: "image", title: "Backdrops", line: "A scene, a picture or a video behind the whole app, or describe one and an agent makes it. Settings › Backdrop." },
-    { icon: "play", title: "Proof clips and Test it", line: "A short clip walking through the page that changed, before and after, a GIF in the pull request, and the tests the agent ran." },
-    { icon: "sun", title: "Today on Home", line: "Broken CI, audit warnings, your issues and old TODOs, each a click to start, or queued for Tonight while you sleep." },
-    { icon: "diagram", title: "Code map", line: "Deep Dive draws your repo top to bottom: where it starts, what it rests on, and everything one part touches." },
+    { icon: "crown", title: "Captains", line: "Turn one on for a project and it minds every thread there; its row in the sidebar says what it's doing now." },
+    { icon: "check", title: "Checked and ready", line: "Finished work is tested by itself, a failure goes back once, and checked work waits for your Review & ship." },
+    { icon: "message", title: "Talk to it", line: "Say what should get done and it follows it to ready, splitting big tasks across your coding tools." },
+    { icon: "zap", title: "Fast, solid, live", line: "Working rows show their step and clock, nothing is lost to a full disk or a crash, and long sessions open at once." },
   ],
 };
 

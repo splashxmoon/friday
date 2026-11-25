@@ -54,11 +54,13 @@ export function checkpointBefore(events: SessionEvent[], seq: number): string | 
  * The checkpoint a run started from: on its `run.started`, or, from a runner that takes it itself, the `run.checkpoint` said on
  * its lane after that start and before the next one.
  */
-export function startCheckpoint(events: SessionEvent[], start: SessionEvent): string | undefined {
+export function startCheckpoint(events: SessionEvent[], start: SessionEvent, at?: number): string | undefined {
   if (start.body.type !== "run.started") return undefined;
   if (start.body.checkpoint) return start.body.checkpoint;
   const lane = start.lane ?? MAIN_LANE;
-  for (let i = events.indexOf(start) + 1; i > 0 && i < events.length; i++) {
+  // Where the start is, when the caller knows: found again for every run, a 20,000-event log took 4 ms a draw (spec 13).
+  const from = at !== undefined && events[at] === start ? at : events.indexOf(start);
+  for (let i = from + 1; i > 0 && i < events.length; i++) {
     const e = events[i]!;
     if ((e.lane ?? MAIN_LANE) !== lane) continue;
     if (e.body.type === "run.started") return undefined;
@@ -194,24 +196,73 @@ export function isRedo(events: SessionEvent[], ev: SessionEvent): boolean {
  * undoing the second of two runs said "Undone" on both (Arun's e2e pass, 2026-11-04).
  */
 export function undoneRuns(events: SessionEvent[]): Set<string> {
+  // One pass to learn, for the whole log, what the old way looked up again for each run and each restore (spec 13, Arun
+  // 2026-11-24: "Go all out and fix these problems"): it ran on every event that arrived, and at 20,000 events a log took 4 ms
+  // a draw. The same answers, in the same order: test/rewind.test.ts checks them against the old way on random logs.
+  /** Each run's checkpoint, by its start's index: its own, or the `run.checkpoint` said on its lane before its next start. */
+  const startSha = new Map<number, string>();
+  /** Each lane's start still waiting for a `run.checkpoint`. */
+  const awaiting = new Map<string, number>();
+  /** The first start (or checkpoint) to take each checkpoint, by lane, and whether that run's end saved where it left the folder. */
+  const took = new Set<string>();
+  const endAfter = new Map<string, string | undefined>();
+  const toEnd = new Map<string, string[]>();
+  /** The last restore on each lane to have taken each checkpoint (its `undo`), over the whole log. */
+  const lastUndo = new Map<string, SessionEvent>();
+  const key = (lane: string, sha: string) => `${lane}\0${sha}`;
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i]!;
+    const b = e.body;
+    const lane = e.lane ?? MAIN_LANE;
+    if (b.type === "run.started") {
+      awaiting.delete(lane);
+      if (b.checkpoint) startSha.set(i, b.checkpoint);
+      else awaiting.set(lane, i);
+    } else if (b.type === "run.checkpoint") {
+      const at = awaiting.get(lane);
+      if (at !== undefined) startSha.set(at, b.checkpoint), awaiting.delete(lane);
+    }
+    if ((b.type === "run.started" || b.type === "run.checkpoint") && b.checkpoint && !took.has(key(lane, b.checkpoint))) {
+      took.add(key(lane, b.checkpoint));
+      toEnd.set(lane, [...(toEnd.get(lane) ?? []), key(lane, b.checkpoint)]);
+    } else if (b.type === "run.ended") {
+      for (const k of toEnd.get(lane) ?? []) endAfter.set(k, b.after);
+      toEnd.delete(lane);
+    } else if (b.type === "folder.restored") lastUndo.set(key(lane, b.undo), e);
+  }
+  /** runEndAfter, from what was learned. */
+  const endOf = (lane: string, sha: string) => (took.has(key(lane, sha)) ? endAfter.get(key(lane, sha)) : ((u) => (u?.body.type === "folder.restored" ? u.body.after : undefined))(lastUndo.get(key(lane, sha))));
+
   const out = new Set<string>();
   /** Each lane's runs in order, by the checkpoint each started from. */
   const runs = new Map<string, { sha: string; seq: number }[]>();
   /** What each restore took back or gave back, by its seq. */
   const touched = new Map<number, string[]>();
-  for (const e of events) {
+  /** Each restore so far by the checkpoint it took (its `undo`), on its lane: the one a later restore of that checkpoint reverses. */
+  const undoes = new Map<string, SessionEvent>();
+  /** Whether each restore so far is a redo (isRedo), by its seq. */
+  const redid = new Map<number, boolean>();
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i]!;
     const lane = e.lane ?? MAIN_LANE;
     if (e.body.type === "run.started") {
-      const sha = startCheckpoint(events, e);
-      if (sha) runs.set(lane, [...(runs.get(lane) ?? []), { sha, seq: e.seq }]);
+      const sha = startSha.get(i);
+      if (sha) {
+        const list = runs.get(lane);
+        if (list) list.push({ sha, seq: e.seq });
+        else runs.set(lane, [{ sha, seq: e.seq }]);
+      }
       continue;
     }
     if (e.body.type !== "folder.restored") continue;
-    const back = reversedBy(events, e);
+    // reversedBy: the last restore before this one on its lane that took the checkpoint this one puts back.
+    const back = undoes.get(key(lane, e.body.sha));
+    redid.set(e.seq, back ? !redid.get(back.seq) : false);
+    undoes.set(key(lane, e.body.undo), e);
     if (back) {
       const shas = touched.get(back.seq) ?? [];
       touched.set(e.seq, shas);
-      const redo = isRedo(events, e);
+      const redo = redid.get(e.seq)!;
       for (const sha of shas) redo ? out.delete(sha) : out.add(sha);
       continue;
     }
@@ -222,7 +273,7 @@ export function undoneRuns(events: SessionEvent[]): Set<string> {
       touched.set(e.seq, []);
       continue;
     }
-    const bounded = e.body.rewoundTo === undefined && !e.body.whole && !!runEndAfter(events, lane, sha);
+    const bounded = e.body.rewoundTo === undefined && !e.body.whole && !!endOf(lane, sha);
     const shas = (bounded ? [list[at]!] : list.slice(at)).map((r) => r.sha);
     touched.set(e.seq, shas);
     for (const s of shas) out.add(s);

@@ -45,3 +45,15 @@ test("opened large, a diagram or drawing fills its space; in the chat a wide dia
   assert.match(inline, /g\.style\.flex=narrow\?"none"/, "and the row it sits in can't squeeze it past that");
   assert.match(liveDocument("svg", `<svg viewBox="0 0 10 10"></svg>`, true, true), /svg\{width:100%!important/);
 });
+
+test("a drawing is set to read in the theme it is shown in: its too-dark or too-light text and lost lines are retinted once drawn", () => {
+  const svg = '<svg viewBox="0 0 10 10"><text fill="#222">Title</text></svg>';
+  for (const [dark, bg] of [[true, "0.02"], [false, "0.9"]] as const) {
+    const doc = liveDocument("svg", svg, dark);
+    assert.match(doc, new RegExp(`const bg=${bg};`), "against this theme's shade");
+    assert.match(doc, /el\.style\.fill="var\(--fg\)"/, "text takes the theme's text colour");
+    assert.ok(doc.indexOf("svg.dataset.tuned") > doc.indexOf("<text"), "after the drawing");
+  }
+  // Pages and diagrams are themed their own way; only drawings are retinted.
+  assert.doesNotMatch(liveDocument("html", "<p>hi</p>", true), /svg\.dataset\.tuned/);
+});

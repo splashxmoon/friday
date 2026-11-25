@@ -6,7 +6,8 @@ import { driverOf, type SessionState } from "../session/projection.js";
 import { MAIN_LANE, type Member } from "../types.js";
 import { argsOf } from "./args.js";
 import { Icon } from "./icons.js";
-import { MenuButton, useConfirm } from "./ui.js";
+import { MenuButton, SkeletonLines, useConfirm } from "./ui.js";
+import { useFullFiles } from "./patchSource.js";
 import { ShipDialog } from "./ShipLazy.js";
 import type { Dest } from "./Ship.js";
 import type { Send } from "./useSession.js";
@@ -437,6 +438,7 @@ export function ReviewCard({
       if (!latest || lastCommitSeq > endSeq) return;
       const what = takeCardAsk(sid, lane);
       if (what === "commit") setShip("here");
+      else if (what === "pr") setShip("pr");
       else if (what === "review") onReview?.();
     };
     take();
@@ -487,6 +489,9 @@ export function ReviewCard({
     redraw((n) => n + 1);
   };
   const shown = more ? files : files.slice(0, PEEK);
+  // An open row's lines, fetched as it opens: the session came with its change sets by name and counts (patchSource.ts; spec 13).
+  const { files: full, loading: fetching } = useFullFiles(files, files.some((f) => openRows.has(rowKey(f.path))));
+  const textOf = (f: DiffFile) => full.find((x) => x.path === f.path)?.patch || f.patch;
   // A run that stands undone had its changes taken back, so a commit made after the undo isn't its: "Undone" before "Committed"
   // (2026-11-04 QA: a commit after an undo marked the undone run Committed).
   const outcome = applied ? `Brought into ${into}` : undone ? "Undone" : committed ? "Committed" : "";
@@ -565,8 +570,10 @@ export function ReviewCard({
         <span className="cc-sp" />
         {/* The first changed file, in the Code view's editor (⌘E): its own button so it is the same in every state below. */}
         {isLocal() && files.length > 0 && !files.every((f) => f.status === "deleted") && (
-          <button type="button" className="cc-btn line cc-code" title={`Open the changes in Code (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘E" : "Ctrl+E"})`} onClick={() => openInCode((files.find((f) => f.status !== "deleted") ?? files[0]!).path, undefined, { review: true })}>
-            Open in Code <kbd aria-hidden="true">{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘E" : "Ctrl+E"}</kbd>
+          // Narrow, its mark alone (style.css .cc-code), so Commit stays whole beside it at phone width (spec 13 polish).
+          <button type="button" className="cc-btn line cc-code" aria-label="Open in Code" title={`Open the changes in Code (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘E" : "Ctrl+E"})`} onClick={() => openInCode((files.find((f) => f.status !== "deleted") ?? files[0]!).path, undefined, { review: true })}>
+            <Icon name="code" size={13} className="cc-code-ic" />
+            <span className="cc-code-word">Open in Code</span> <kbd className="cc-code-word" aria-hidden="true">{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘E" : "Ctrl+E"}</kbd>
           </button>
         )}
         {outcome ? (
@@ -657,7 +664,7 @@ export function ReviewCard({
         {shown.map((f) => {
           const open = openRows.has(rowKey(f.path));
           const cut = f.path.lastIndexOf("/");
-          const mini = open && f.patch ? miniDiff(f.patch) : null;
+          const mini = open && textOf(f) ? miniDiff(textOf(f)) : null;
           return (
             <li key={f.path} className={open ? "open" : ""}>
               <button type="button" className="cc-row" aria-expanded={open} title={f.path} onClick={() => toggle(f.path)}>
@@ -675,6 +682,7 @@ export function ReviewCard({
               </button>
               {open && (
                 <div className="cc-mini">
+                  {!mini && fetching && f.later !== undefined && <div className="cc-mini-wait" aria-label="Fetching its lines"><SkeletonLines lines={3} gap={8} /></div>}
                   {mini?.lines.map((l, i) => (
                     <div key={i} className={`cc-ln ${l.kind}`}>
                       <span>{l.n ?? ""}</span>
@@ -682,7 +690,7 @@ export function ReviewCard({
                     </div>
                   ))}
                   <div className="cc-mini-foot">
-                    <span>{!mini ? "Its lines are in the Changes panel." : mini.changed > MINI_LINES ? `${Math.min(MINI_LINES, mini.changed)} of ${mini.changed} changed lines` : `${mini.changed} changed line${mini.changed === 1 ? "" : "s"}`}</span>
+                    <span>{!mini ? (fetching && f.later !== undefined ? "Fetching its lines…" : "Its lines are in the Changes panel.") : mini.changed > MINI_LINES ? `${Math.min(MINI_LINES, mini.changed)} of ${mini.changed} changed lines` : `${mini.changed} changed line${mini.changed === 1 ? "" : "s"}`}</span>
                     {onReview && (
                       <button type="button" className="link-btn" onClick={() => onReview(f.path)}>
                         Open in Changes <Icon name="arrowRight" size={12} />

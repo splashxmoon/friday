@@ -1,6 +1,7 @@
 import { roleOf, type SessionState } from "./session/projection.js";
 import type { PrStatus } from "./github-status.js";
 import { doingNow, stoppedDetail } from "./activity-line.js";
+import type { Streaming } from "./step-words.js";
 import { ENGINE_NAMES, MAIN_LANE, type EngineTool, type SessionEvent } from "./types.js";
 import { commandFailed, receiptOf } from "./receipt.js";
 import { riskOf, type Risk, type RiskFacts } from "./review-risk.js";
@@ -113,6 +114,11 @@ export function reviewFacts(mine: SessionEvent[], uncommitted: boolean): RiskFac
   const answer = span.findLast((e) => e.body.type === "agent.message" && !!e.body.text.trim());
   const receipt = receiptOf({ calls, failed: (id) => results.get(id) ?? null, files: [...files.values()], ...(answer?.body.type === "agent.message" ? { answer: answer.body.text } : {}) });
   const review = span.findLast((e) => e.body.type === "review.done");
+  // The tests run for its last run once it was done (Check it, proof.tests) are how it was checked, as the reply's badge says: a card
+  // read "Tests not run" over "Checked · 3 tests pass".
+  const lastRun = span.findLast((e) => e.body.type === "run.started")?.seq ?? -1;
+  const checked = span.findLast((e) => e.seq > lastRun && e.body.type === "proof.tests" && e.body.runs.length);
+  const tests = checked?.body.type === "proof.tests" ? (checked.body.runs.every((r) => r.ok) ? "pass" : "fail") : receipt.tests;
 
   return {
     files: [...files.values()].slice(0, MAX_FACT_FILES).map(({ path, additions, deletions }) => ({ path, additions, deletions })),
@@ -120,7 +126,7 @@ export function reviewFacts(mine: SessionEvent[], uncommitted: boolean): RiskFac
     lines: [...files.values()].reduce((n, f) => n + f.additions + f.deletions, 0),
     fileCount: files.size,
     // No commands in the log at all says nothing about tests either way (a tool whose calls aren't mirrored here).
-    ...(calls.length ? { tests: receipt.tests } : {}),
+    ...(calls.length || checked ? { tests } : {}),
     ...(receipt.flags.length ? { flags: receipt.flags } : {}),
     ...(review?.body.type === "review.done" && review.body.findings.length ? { findings: review.body.findings } : {}),
   };
@@ -158,7 +164,7 @@ export function putOffCards(cards: BoardCard[], off: ReadonlySet<string>): Board
 }
 
 /** The cards for one session, as seen by one person. */
-export function boardCards(state: SessionState, events: SessionEvent[], meId: string): BoardCard[] {
+export function boardCards(state: SessionState, events: SessionEvent[], meId: string, /** What a lane is streaming now (bus.ts streamingNow): said as the reply says it. */ streaming?: (lane: string) => Streaming): BoardCard[] {
   const lanes = [MAIN_LANE, ...state.lanes.map((l) => l.id)];
   const out: BoardCard[] = [];
 
@@ -268,7 +274,7 @@ export function boardCards(state: SessionState, events: SessionEvent[], meId: st
       column = "working";
       status = "Working";
       // Which kind of working: reading, editing, running the tests. A column of "Working" cards says nothing about which is stuck.
-      detail = doingNow(events, lane)?.text ?? "";
+      detail = doingNow(events, lane, streaming?.(lane) ?? null)?.text ?? "";
     } else if (short) {
       column = "needs";
       status = "Stopped early";

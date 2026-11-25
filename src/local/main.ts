@@ -21,7 +21,10 @@ if (process.argv[2] === "mcp") {
   await (await import("./outside-mcp.js")).serveOutsideMcp();
   await new Promise(() => {});
 }
-const { startLocal } = await import("./start.js");
+// Its errors and warnings kept in <FRIDAY_HOME>/diagnostics/friday.log, and a stray error logged rather than ending every session
+// (diagnostics.ts), as in the desktop app: Settings › Updates › Copy diagnostics reads it.
+(await import("../diagnostics.js")).installProcessLog();
+const { startLocal, FridayAlreadyOpen } = await import("./start.js");
 // Another computer's extra machine (add-computer.ts): paired with the link, run headless; as a service, removed there it stops for
 // good (exit 0, which launchd and systemd don't start again), rather than trying again forever.
 const at = process.argv.indexOf("--join");
@@ -29,6 +32,13 @@ const join = at > 0 ? process.argv[at + 1] : process.env.FRIDAY_JOIN;
 const friday = await startLocal({
   ...(join ? { join } : {}),
   ...(process.env.FRIDAY_SERVICE === "1" ? { onGone: () => (console.log("[computers] removed there: stopping"), void friday.close().finally(() => process.exit(0))) } : {}),
+}).catch((e: unknown) => {
+  // Another Friday has this folder and isn't answering yet: said plainly, and not started beside it (start.ts takeLock).
+  if (e instanceof FridayAlreadyOpen) {
+    console.error(e.message);
+    process.exit(1);
+  }
+  throw e;
 });
 console.log(friday.already ? `Friday is already running at ${friday.url}` : `Friday is running at ${friday.url}`);
 if (!friday.already) console.log(`Kept in ${friday.home}. Stop with Ctrl+C.`);

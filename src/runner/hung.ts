@@ -76,3 +76,91 @@ export function neverStarted(silent: number, start: number | null, now: number |
 export function isHung(quiet: number, then: number | null, now: number | null): boolean {
   return quiet >= hungMs() && then !== null && now !== null && now - then < HUNG_CPU_S;
 }
+
+/**
+ * Time a tool has been silent while the computer was awake (spec 13, Arun 2026-11-24: "Go all out and fix these problems").
+ *
+ * Silence was measured on the wall clock, which goes on while a laptop's lid is closed, while the timers that look at it, and the
+ * tool's own CPU, don't: back from a night asleep, a tool mid-way through a long, quiet command could be ended as hung on its next
+ * look. So silence is measured on the monotonic clock (performance.now(), which stops while the computer sleeps on a Mac and on
+ * Linux), and any sleep noticed in the window, on any system, starts the silence over: the CPU the window compares was taken
+ * across the sleep, and says nothing about the tool.
+ */
+
+/** A gap this much longer than the watch's beat means the computer was asleep (or this process was stopped). */
+const SLEPT_SLACK_MS = 60_000;
+
+/**
+ * Notices the computer sleeping: it looks every `everyMs` while something holds it, and a look that comes much later than that
+ * means the time between was spent asleep. Whatever clock timers keep (they pause in sleep on a Mac, and fire late on Windows),
+ * the wall clock between two looks shows it. Runs only while a turn holds it, unref'd.
+ */
+export class SleepWatch {
+  private last: number;
+  /** How many sleeps (or clock jumps, forward or back) it has noticed. */
+  private jumps = 0;
+  private holders = 0;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  constructor(
+    private readonly wall: () => number = Date.now,
+    private readonly everyMs = 30_000,
+  ) {
+    this.last = wall();
+  }
+  /** One look. */
+  look(): void {
+    const t = this.wall();
+    if (t - this.last > this.everyMs + SLEPT_SLACK_MS || t < this.last) this.jumps++;
+    this.last = t;
+  }
+  /** The sleeps noticed so far, after a look now: a count that changed since an earlier call means one came in between. */
+  sleeps(): number {
+    this.look();
+    return this.jumps;
+  }
+  /** Looking, while a turn runs. Returns the way to let go. */
+  hold(): () => void {
+    if (this.holders++ === 0) {
+      this.last = this.wall();
+      this.timer = setInterval(() => this.look(), this.everyMs);
+      this.timer.unref?.();
+    }
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      if (--this.holders === 0 && this.timer) {
+        clearInterval(this.timer);
+        this.timer = null;
+      }
+    };
+  }
+}
+
+/** The one every turn shares. */
+export const sleepWatch = new SleepWatch();
+
+/** How long it has been quiet, awake: `heard()` at each word, `quiet()` at each look. */
+export class Silence {
+  private since: number;
+  private slept: number;
+  constructor(
+    private readonly watch: Pick<SleepWatch, "sleeps"> = sleepWatch,
+    private readonly mono: () => number = () => performance.now(),
+  ) {
+    this.since = mono();
+    this.slept = watch.sleeps();
+  }
+  heard(): void {
+    this.since = this.mono();
+    this.slept = this.watch.sleeps();
+  }
+  /** Milliseconds quiet on the monotonic clock; 0, and started over, when the computer slept since it began. */
+  quiet(): number {
+    if (this.watch.sleeps() !== this.slept) {
+      this.heard();
+      return 0;
+    }
+    return Math.max(0, this.mono() - this.since);
+  }
+}

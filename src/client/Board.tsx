@@ -7,9 +7,10 @@ import { api } from "./api.js";
 import { EngineMark, FridayMark } from "./BrandMarks.js";
 import { Avatar, Icon } from "./icons.js";
 import { teamCards, teamFace } from "./Teammates.js";
-import { PresenceRing, useNow, type Presence } from "./presence.js";
+import { PresenceRing, useNow, type Presence, tickEvery } from "./presence.js";
 import { askCard } from "./card-ask.js";
 import { Shine } from "./shine.js";
+import { runClock } from "../step-words.js";
 import { openOutside } from "./openOutside.js";
 import type { Identity, Project, RecentSession } from "./storage.js";
 import { ConfirmDialog, isTyping, relTime, type Confirmation } from "./ui.js";
@@ -159,14 +160,8 @@ function sizeOf(card: BoardCard): { files: number; add?: number; del?: number } 
 /** The one thing a card offers besides opening it: its pull request, its failing checks, Merge, or a review to do. */
 type CardAction = { label: string; title: string; primary?: boolean; icon?: boolean; run: () => void };
 
-/** How long a run has been going, counted up in place: "14s", "2m 14s", "1h 5m". */
-export function runClock(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
-}
+/** How long a run has been going, counted up in place (step-words.ts, shared with the sidebar's working rows). */
+export { runClock };
 
 /**
  * One agent: its mark, its piece of work and how long since it moved; one live line (what it is doing, or where its pull request
@@ -633,8 +628,8 @@ export function Board({ identity, recents, projects, onOpen: openAgents, onNew, 
   // The "updated 3s ago" in the foot moves on its own.
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    // The page's one 1-second ticker, shared with every other clock and still while the window is hidden (presence.tsx).
+    return tickEvery(1000, setNow);
   }, []);
 
   const projectOf = useMemo(() => new Map(recents.map((r) => [r.sid, r.projectId ?? ""])), [recents]);

@@ -26,6 +26,7 @@ import { commandFailed } from "../receipt.js";
 import { openSettings } from "./openSettings.js";
 import { connectThisComputer } from "./local.js";
 import { isLocal } from "./edition.js";
+import { PanelGuard } from "./guard.js";
 
 /**
  * Every command this session has run, in order.
@@ -160,7 +161,7 @@ function CommandLog({ rows, focus }: { rows: CommandRow[]; focus?: { id: string;
   );
 }
 
-export function TerminalPanel({
+function TerminalPanelDrawn({
   events,
   onClose,
   bare = false,
@@ -1103,5 +1104,14 @@ export function LaneTui({ sid, invite, lane, tool, title, machine, onBack }: { s
       </div>
       {err ? <p className="error small lane-tui-err">{err}</p> : run ? <LocalShell id={toolShellId(sid, lane)} cwd={run.cwd} run={run.line} onOutput={() => {}} /> : <p className="muted small lane-tui-err">Opening {name}…</p>}
     </div>
+  );
+}
+
+/** A terminal that can't be drawn says so in its own place; the session goes on (guard.tsx). */
+export function TerminalPanel(props: Parameters<typeof TerminalPanelDrawn>[0]) {
+  return (
+    <PanelGuard where="terminal" title="The terminal couldn't be shown" reset={props.sid ?? props.cwd ?? ""}>
+      <TerminalPanelDrawn {...props} />
+    </PanelGuard>
   );
 }

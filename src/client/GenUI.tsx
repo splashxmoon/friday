@@ -1,5 +1,6 @@
 import { ArrowDownIcon, ArrowUpIcon, ArrowUpRightIcon, CheckIcon, ChevronRightIcon, PencilLineIcon, ShieldCheckIcon, Undo2Icon, BarChart3Icon, CircleDotIcon, CopyIcon, FileCodeIcon, FileDiffIcon, FileTextIcon, GitPullRequestIcon, GlobeIcon, HistoryIcon, LayoutGridIcon, LinkIcon, ListChecksIcon, MailIcon, MessageSquareIcon, type LucideIcon } from "lucide-react";
 import { AtSignIcon, CalendarClockIcon, Columns2Icon, FlaskConicalIcon, ImagesIcon, ScaleIcon, TableIcon, TextCursorInputIcon, TrendingDownIcon, TrendingUpIcon, VideoIcon } from "./gen-ui-marks.js";
+import { tickEvery } from "./presence.js";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import type { SessionState } from "../session/projection.js";
 import { MAIN_LANE, type SessionEvent } from "../types.js";
@@ -14,6 +15,7 @@ import { SiteIcon } from "./WorkRail.js";
 import type { Send } from "./useSession.js";
 import { Picker } from "./ui.js";
 import "./gen-ui.css";
+import { Guard, GuardLine } from "./guard.js";
 
 /**
  * A card an agent drew in the chat (gen-ui.ts show_ui): where it was first shown, as it is now (shown again
@@ -24,7 +26,7 @@ import "./gen-ui.css";
  * "GO ALL OUT"; the mock in Friday Work HQ product/designs/generative-ui-mock.html): its title and a line under it, the thing
  * itself, and a foot with what can be done; pressed, the foot says what was sent, and the card stays as it was answered.
  */
-export function GenCard({ ev, events, send, sid, invite }: { ev: SessionEvent; state: SessionState; events: SessionEvent[]; send: Send; sid: string; invite: string; stamp?: ReactNode }) {
+function GenCardDrawn({ ev, events, send, sid, invite }: { ev: SessionEvent; state: SessionState; events: SessionEvent[]; send: Send; sid: string; invite: string; stamp?: ReactNode }) {
   const id = ev.body.type === "ui.card" ? ev.body.id : "";
   const lane = ev.lane ?? MAIN_LANE;
   // Found once per new event, not on every redraw: the chat redraws on every word an agent streams.
@@ -451,8 +453,8 @@ function useNow(on: boolean) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!on) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    // The page's one 1-second ticker, shared with every other clock and still while the window is hidden (presence.tsx).
+    return tickEvery(1000, setNow);
   }, [on]);
   return now;
 }
@@ -1328,5 +1330,14 @@ function Timeline({ card }: CardProps) {
         ))}
       </ol>
     </Shell>
+  );
+}
+
+/** A card that can't be drawn is one quiet line in the reply, not the whole session (guard.tsx). */
+export function GenCard(props: Parameters<typeof GenCardDrawn>[0]) {
+  return (
+    <Guard where="card" reset={props.ev.seq} fallback={(c) => <GuardLine caught={c} label="This card couldn't be shown" />}>
+      <GenCardDrawn {...props} />
+    </Guard>
   );
 }

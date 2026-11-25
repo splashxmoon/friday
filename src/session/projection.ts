@@ -1,4 +1,5 @@
 import { ownPlan } from "../own-plan.js";
+import { callDoing } from "../step-words.js";
 import type { GoalState } from "../goal.js";
 import { engineName, liveMachine, MAIN_LANE, EFFORT_LEVELS, type BoardTaskDef, type EngineEffort, type EngineTool, type HubState } from "../types.js";
 import { parseAsks, type Ask } from "../ask-parse.js";
@@ -176,6 +177,12 @@ export interface SessionState {
   heardAt?: Record<string, number>;
   /** What each lane's agent is doing right now: its latest tool call while its run goes, as a verb and what it touches (step-words.ts). */
   doing?: Record<string, { name: string; target?: string }>;
+  /**
+   * Each lane's calls still out in the run under way (no result back yet), by id; there, even empty, once its agent has said anything in
+   * the run. So "Running npm test" is said while it runs, "Thinking about what to do next" once it is back, and "Getting started" before
+   * anything (step-words.ts liveWords). Absent on a state kept before it was.
+   */
+  inFlight?: Record<string, string[]>;
   /** When each lane's last turn finished well, by seq: an idle agent that has done something, not one that never ran. */
   finished?: Record<string, number>;
   /** Each lane whose last turn somebody stopped (run.pause), by seq, until its next turn starts: "stopped", not "done". */
@@ -890,6 +897,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     else s.laneRuns[lane] = next;
     // A new run, or one that ended, is doing nothing yet.
     if (s.doing) delete s.doing[lane];
+    if (s.inFlight) delete s.inFlight[lane];
     if (status === "running" && s.runWrote) delete s.runWrote[lane];
   };
   // Only the agent itself: the system's own events (a machine coming online, a setting) would make a stuck agent look alive.
@@ -1537,6 +1545,9 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       {
         const last = b.toolCalls.at(-1);
         if (last) (s.doing ??= {})[lane] = callDoing(last);
+        const out = ((s.inFlight ??= {})[lane] ??= []);
+        for (const c of b.toolCalls) if (c.id && !out.includes(c.id)) out.push(c.id);
+        if (out.length > 40) out.splice(0, out.length - 40);
       }
       // A revised plan is a different plan: what people said of the old one doesn't carry over.
       if (b.toolCalls.some((c) => c.name === "update_plan")) delete s.planReviews[lane];
@@ -1575,6 +1586,9 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     case "run.interrupt":
       break;
     case "tool.result": {
+      const out = s.inFlight?.[lane];
+      const at = out ? out.indexOf(b.callId) : -1;
+      if (at >= 0) out!.splice(at, 1);
       const opened = openedPr(b.name, b.output, b.isError);
       if (opened) addPr(s, opened);
       break;
@@ -1585,19 +1599,8 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
 
 const PR_URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/;
 /** A pull request a tool call just opened: `gh pr create` ends on its link alone; a GitHub tool's create_pull_request says it. */
-/** A tool call as what it touches, for "Editing Sidebar.tsx" on a row: the file, command, pattern or address it names, short. */
-export function callDoing(call: { name: string; arguments: string }): { name: string; target?: string } {
-  let args: Record<string, unknown> = {};
-  try {
-    const v = JSON.parse(call.arguments) as unknown;
-    if (v && typeof v === "object") args = v as Record<string, unknown>;
-  } catch {
-    // Arguments still being written, or not JSON: the verb alone.
-  }
-  const pick = ["path", "file_path", "command", "pattern", "query", "url", "name"].map((k) => args[k]).find((v): v is string => typeof v === "string" && !!v.trim());
-  const target = pick?.trim().split(/\r?\n/)[0]!.slice(0, 120);
-  return { name: call.name.slice(0, 60), ...(target ? { target } : {}) };
-}
+/** A tool call as what it touches (step-words.ts), here too for what already reads it from the projection. */
+export { callDoing };
 
 export function openedPr(name: string, output: string, isError: boolean): string | null {
   if (isError || !output.includes("github.com/")) return null;

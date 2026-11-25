@@ -173,6 +173,7 @@ html.desktop .tc :is(button, [role="button"]):not(:disabled), html.desktop :is(.
 .tc-proof:hover, .tc-proof:focus-visible { text-decoration: underline; text-underline-offset: 2px; outline: none; }
 .tc-agent.is-done .tc-proof.is-warn { color: var(--amber); }
 .tc-agent.is-done .tc-proof.is-bad { color: var(--red); }
+.tc-agent.is-done .tc-proof.is-wait { color: var(--text-muted); }
 
 /* The threads the agents opened (ThreadCard OpenedList), under the agents. */
 .tc-opened { display: flex; flex-direction: column; gap: 1px; margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); }
@@ -198,6 +199,7 @@ html.desktop .tc :is(button, [role="button"]):not(:disabled), html.desktop :is(.
 .tpf-verdict.is-ok { background: color-mix(in srgb, var(--green) 13%, transparent); color: var(--green); }
 .tpf-verdict.is-warn { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
 .tpf-verdict.is-bad { background: color-mix(in srgb, var(--red) 13%, transparent); color: var(--red); }
+.tpf-verdict.is-wait { background: var(--hover); color: var(--text-muted); }
 
 .tpf-said { margin: 0 16px 2px; padding: 9px 12px; border-left: 2px solid var(--border-strong); border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--ink) 3.5%, transparent); color: var(--ink-2); font-size: 12.5px; line-height: 1.5; font-style: normal; text-wrap: pretty; }
 
@@ -267,3 +269,48 @@ html.desktop .tc :is(button, [role="button"]):not(:disabled), html.desktop :is(.
 .tc-settled.is-bad { color: var(--red); }
 
 
+
+/* The agents as a short log of who worked how long (Arun, 2026-11-24: "i kinda just want this", of the Ship path mock's agents):
+   each one's mark, name and where it stands in a word; under it a bar of how long it worked beside the longest; its time at the
+   right, where its ⋯ shows on hover. Its subagents at work sit under it on an elbow. */
+.tc-agent { grid-template-columns: 22px minmax(0, 1fr) 40px; gap: 10px; min-height: 46px; padding: 7px 8px; }
+.tc-agent .tc-mark { width: 22px; height: 22px; border-radius: 7px; }
+.tc-agent .tc-agent-name { gap: 6px; }
+.tc-word { flex: none; margin-left: auto; padding: 0; border: 0; background: none; font: 400 12px var(--font); color: var(--text-muted); white-space: nowrap; }
+.tc-word.is-done { color: var(--green); }
+.tc-word.is-work { color: var(--live); }
+.tc-word.is-need, .tc-word.is-wait { color: var(--amber); }
+.tc-word.is-bad { color: var(--red); }
+.tc-agent .tc-proof { display: inline; max-width: none; }
+.tc-agent .tc-proof.is-done { color: var(--green); }
+.tc-agent .tc-proof.is-need { color: var(--amber); }
+.tc-agent .tc-proof.is-bad { color: var(--red); }
+.tc-agent .tc-proof.is-idle { color: var(--text-muted); }
+.tc-agent .tc-answer { margin-left: auto; height: 20px; padding: 0 8px; }
+.tc-bar { position: relative; display: block; height: 3px; margin-top: 7px; border-radius: 2px; background: var(--hover-strong); overflow: hidden; }
+.tc-agent:hover .tc-bar, .tc-agent.on .tc-bar { background: color-mix(in srgb, var(--ink) 10%, transparent); }
+.tc-bar i { --tone: var(--faint); display: block; height: 100%; border-radius: 2px; background: color-mix(in srgb, var(--tone) 78%, transparent); transition: width 240ms cubic-bezier(.2, .7, .2, 1); }
+.tc-bar.is-done i { --tone: var(--green); }
+.tc-bar.is-work i { --tone: var(--live); }
+.tc-bar.is-need i, .tc-bar.is-wait i { --tone: var(--amber); }
+.tc-bar.is-bad i { --tone: var(--red); }
+@media (prefers-reduced-motion: reduce) { .tc-bar i { transition: none; } }
+.tc-agent .tc-agent-end { position: relative; display: flex; justify-content: flex-end; align-items: center; height: 100%; }
+.tc-agent .tc-time { color: var(--text-muted); font: 400 12px var(--mono); font-variant-numeric: tabular-nums; transition: opacity 120ms; }
+.tc-agent.is-work .tc-time { color: var(--ink-2); }
+.tc-agent .tc-agent-end .tc-agent-more { position: absolute; right: -4px; top: 50%; width: 28px; height: 28px; margin: 0; padding: 0; transform: translateY(-50%); opacity: 0; transition: opacity 120ms; }
+.tc-agent:is(:hover, :focus-within) .tc-agent-more { opacity: 1; }
+.tc-agent:is(:hover, :focus-within):has(.tc-agent-more) .tc-time { opacity: 0; }
+@media (hover: none) { .tc-agent .tc-agent-more { opacity: 1; } .tc-agent:has(.tc-agent-more) .tc-time { opacity: 0; } }
+
+.tc-subs { margin: -2px 0 2px; padding: 0; list-style: none; }
+.tc-sub { display: grid; grid-template-columns: 22px minmax(0, 1fr) 40px; gap: 10px; align-items: center; width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--ink-2); font: 400 12px var(--font); text-align: left; cursor: pointer; }
+.tc-sub:hover, .tc-sub:focus-visible { background: var(--hover); color: var(--ink); outline: none; }
+.tc-elbow { justify-self: center; width: 9px; height: 15px; margin-top: -12px; transform: translateX(4px); border-left: 1.5px solid var(--border-strong); border-bottom: 1.5px solid var(--border-strong); border-bottom-left-radius: 6px; }
+.tc-sub-what { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tc-sub-what .ring-spin { flex: none; width: 11px; height: 11px; }
+.tc-sub .tc-time { justify-self: end; color: var(--live); font: 400 12px var(--mono); font-variant-numeric: tabular-nums; }
+.tc-sub-more { padding: 0 8px 4px 40px; color: var(--text-muted); font-size: 12px; }
+/* Said under their agents, the status bar's tray of them isn't said again in the card; folded, it is. */
+.tc:has(.tc-agents:not(.is-folded)) .tc-slot .subs-tray { display: none; }
+.tc:has(.tc-agents:not(.is-folded)) .tc-slot:not(:has(> :not(.subs-tray))) { display: none; }

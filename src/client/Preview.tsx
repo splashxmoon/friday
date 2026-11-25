@@ -14,6 +14,7 @@ import type { Identity } from "./storage.js";
 import { MenuButton, type MenuItem } from "./ui.js";
 import { IosPreview } from "./IosPreview.js";
 import { tabListKeys } from "./roving.js";
+import { PanelGuard } from "./guard.js";
 
 /** A server on this machine, as the Local servers menu lists it. */
 export interface LocalServer {
@@ -268,7 +269,7 @@ export function loadsDirectly(o: { mode: string; protocol: string; desktop: bool
   return o.mode === "linked" && o.desktop && o.ownMachine;
 }
 
-export function PreviewPanel({
+function PreviewPanelDrawn({
   identity,
   cwd,
   sid,
@@ -409,6 +410,8 @@ export function PreviewPanel({
       const [s, o] = await Promise.all([ask<{ preview: PreviewInfo | null }>("status"), ask<Options>("options")]);
       setInfo(same(s.preview));
       setOptions(same<Options | null>(o));
+      // Read: whatever stood in the browser's place is gone, so Try again brings the browser back (it stayed on the error before).
+      setErr("");
     } catch (e) {
       // A session with no folder at all (nothing uploaded, no agent's folder yet) has no project to run, which isn't a fault:
       // the browser stays, for any other page (Arun, 2026-10-26: such a session showed this error in place of its browser).
@@ -650,6 +653,13 @@ export function PreviewPanel({
   // Point at something in the page and it lands in the message box, described.
   const [pointing, setPointing] = useState(false);
   const [pointNote, setPointNote] = useState("");
+  /** A stop or a screenshot that went wrong: said under the page for a while, the browser left as it was. */
+  const [flash, setFlash] = useState("");
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(""), 8_000);
+    return () => clearTimeout(t);
+  }, [flash]);
   // A note being written on something picked in the page (asNote), and its draft.
   const [picked, setPicked] = useState<Pick | null>(null);
   const [note, setNote] = useState("");
@@ -764,14 +774,14 @@ export function PreviewPanel({
     const view = views.current.get(tabs[at]?.id ?? "");
     if (!view?.capturePage || !sid || !invite || !send) return;
     setShooting(true);
-    setErr("");
+    setFlash("");
     try {
       const image = await view.capturePage();
       const att = await uploadFile(sid, invite, identity.id, { url: image.toDataURL(), mediaType: "image/png", filename: "preview.png" });
       const r = await send({ type: "instruct", text: "Here is what the preview shows right now.", attachments: [att] });
-      if (!r.ok) setErr(r.error ?? "Couldn't send the screenshot. Try again.");
+      if (!r.ok) setFlash(r.error ?? "Couldn't send the screenshot. Try again.");
     } catch (e) {
-      setErr((e as Error).message);
+      setFlash((e as Error).message);
     } finally {
       setShooting(false);
     }
@@ -784,19 +794,22 @@ export function PreviewPanel({
   const servers = localServers(info, tasks, found);
   const ours = servers.filter((x) => !x.elsewhere);
   const others = servers.filter((x) => x.elsewhere);
-  // Stopping one from its row: the preview's own stop, Friday's background task, or (runner/ports.ts) what listens on the port.
+  // Stopping one from its row: the preview's own stop, Friday's background task, or (runner/ports.ts) what listens on the port. What
+  // went wrong is a note under the page, not the browser's whole place: a stop that failed left only red words and a Try again
+  // that couldn't bring the browser back (Arun, 2026-11-24: "fix this bug", "Nothing Friday knows of is serving localhost:5173 any
+  // more."). A server gone before Stop reached it is stopped, which is what Stop was for: nothing to say.
   const stopServer = async (s: LocalServer) => {
-    setErr("");
+    setFlash("");
     try {
       if (s.preview) return void (await stop());
       if (s.stop && "task" in s.stop) return void (await stopTask(s.stop.task));
       if (s.stop && "port" in s.stop && cwd) {
         const r = await hostApi<{ stopped: boolean; error?: string }>(identity, "/api/runner/servers.stop", { method: "POST", body: JSON.stringify({ cwd, port: s.stop.port }) });
-        if (!r.stopped) setErr(r.error ?? "Couldn't stop it.");
+        if (!r.stopped && !/any more\.?$/.test(r.error ?? "")) setFlash(r.error ?? `Couldn't stop ${s.url.replace(/^https?:\/\//, "")}.`);
       }
     } catch (e) {
       // A runner from before the stop button: it can list servers but not stop them.
-      setErr(/not found|unknown|404/i.test((e as Error).message) ? "Update Friday to stop servers from here." : (e as Error).message);
+      setFlash(/not found|unknown|404/i.test((e as Error).message) ? "Update Friday to stop servers from here." : (e as Error).message);
     }
   };
   const serverItem = (s: LocalServer): MenuItem => {
@@ -881,6 +894,7 @@ export function PreviewPanel({
                 another page, or a different address, shouldn't have to wait
                 for it. The server's own state is shown inside the empty tab. */}
             <div className="bw-tabs" role="tablist" aria-label="Pages" onKeyDown={tabListKeys}>
+              {iosHere && <span className="bw-kinds" ref={setKindSlot} />}
               {tabs.map((t, i) => (
                 <span key={t.id} className={`bw-tab ${i === at ? "on" : ""}`}>
                   <button type="button" role="tab" aria-selected={i === at} tabIndex={i === at ? 0 : -1} className="bw-tab-name" title={addressOf(t.seen ?? t.url) || "New tab"} onClick={() => setAt(i)}>
@@ -898,7 +912,6 @@ export function PreviewPanel({
               <button type="button" className="icon-btn tiny" title="Open a new tab" aria-label="Open a new tab" onClick={() => openTab()}>
                 <Icon name="plus" size={13} />
               </button>
-              {iosHere && <span className="bw-kinds" ref={setKindSlot} />}
             </div>
 
             <form
@@ -996,6 +1009,11 @@ export function PreviewPanel({
               </form>
             )}
             {pointNote && <p className="bw-note muted small">{pointNote}</p>}
+            {flash && (
+              <p className="bw-note error small" role="status">
+                {flash}
+              </p>
+            )}
             {refused && (
               <p className="bw-note muted small" role="status">
                 {refused} is Friday itself, so it doesn't open in this browser: Friday's own pages are in its sidebar.
@@ -1151,22 +1169,23 @@ export function PreviewPanel({
     </>
   );
 
+  // Web / iOS, icons only, first in the panel's top row on both sides: before the page tabs here, before the simulator and
+  // Run on the iOS side (Arun, 2026-11-24, picking B of four placements: it sat after the tabs on the web side and in a row of
+  // its own on the iOS side, so it moved every time it was pressed).
   const kinds = iosHere && (
-    <div className={`preview-kind ${kind === "web" && kindSlot ? "in-row" : ""}`} role="tablist" aria-label="What to preview">
-      <button type="button" role="tab" aria-selected={kind === "web"} className={kind === "web" ? "on" : ""} title="The web page" onClick={() => showKind("web")}>
-        <Icon name="globe" size={12} />
-        Web
+    <div className="preview-kind" role="tablist" aria-label="What to preview">
+      <button type="button" role="tab" aria-selected={kind === "web"} aria-label="Web" className={kind === "web" ? "on" : ""} title="Web: the page" onClick={() => showKind("web")}>
+        <Icon name="globe" size={13} />
       </button>
-      <button type="button" role="tab" aria-selected={kind === "ios"} className={kind === "ios" ? "on" : ""} title="The iOS app, in a simulator" onClick={() => showKind("ios")}>
-        <Icon name="phone" size={12} />
-        iOS
+      <button type="button" role="tab" aria-selected={kind === "ios"} aria-label="iOS" className={kind === "ios" ? "on" : ""} title="iOS: the app, in a simulator" onClick={() => showKind("ios")}>
+        <Icon name="phone" size={13} />
       </button>
     </div>
   );
   const body = iosHere ? (
     <>
-      {kind === "web" && kindSlot ? createPortal(kinds, kindSlot) : <div className="preview-kind-row">{kinds}</div>}
-      {kind === "ios" ? <IosPreview identity={identity} cwd={cwd!} {...(iosElsewhere ? { elsewhere: iosElsewhere } : {})} runAsk={iosAsk} shown={onScreen} sid={sid} {...(invite ? { invite } : {})} {...(send ? { send } : {})} /> : webBody}
+      {kind === "web" && (kindSlot ? createPortal(kinds, kindSlot) : <div className="preview-kind-row">{kinds}</div>)}
+      {kind === "ios" ? <IosPreview lead={kinds} identity={identity} cwd={cwd!} {...(iosElsewhere ? { elsewhere: iosElsewhere } : {})} runAsk={iosAsk} shown={onScreen} sid={sid} {...(invite ? { invite } : {})} {...(send ? { send } : {})} /> : webBody}
     </>
   ) : (
     webBody
@@ -1313,4 +1332,13 @@ export function useBackgroundTasks(identity: Identity, cwd: string | null, every
     [identity, cwd, look],
   );
   return { tasks, stop };
+}
+
+/** The preview that can't be drawn says so in its own place; the session goes on (guard.tsx). */
+export function PreviewPanel(props: Parameters<typeof PreviewPanelDrawn>[0]) {
+  return (
+    <PanelGuard where="preview" title="The preview couldn't be shown" reset={`${props.sid ?? ""}:${props.cwd ?? ""}:${props.work ? 1 : 0}`}>
+      <PreviewPanelDrawn {...props} />
+    </PanelGuard>
+  );
 }

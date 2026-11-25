@@ -11,6 +11,7 @@ import { watchersOf } from "../focus.js";
 import { diffHere, useFocus } from "./focusStore.js";
 import { takesShowDiff } from "./focusDiff.js";
 import { splitPath, splitRows, wordMarks } from "./diff-lines.js";
+import { Guard, GuardLine } from "./guard.js";
 
 // The picture view loads only when a picture file is opened (PictureView.tsx): never in the first load.
 const PictureView = lazy(() => import("./PictureView.js"));
@@ -86,7 +87,7 @@ export type FileChange = "added" | "modified" | "deleted" | "renamed";
 
 const BADGE: Record<FileChange, [string, string]> = { added: ["A", "Added"], modified: ["M", "Modified"], deleted: ["D", "Deleted"], renamed: ["R", "Renamed"] };
 
-export function DiffView({
+function DiffViewDrawn({
   path,
   status,
   change,
@@ -465,4 +466,13 @@ function hue(id: string): number {
   let h = 0;
   for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return h % 6;
+}
+
+/** A diff that can't be drawn is one quiet line in its place, not the session's whole window (guard.tsx). */
+export function DiffView(props: Parameters<typeof DiffViewDrawn>[0]) {
+  return (
+    <Guard where="diff" reset={`${props.path}:${props.lines.length}`} fallback={(c) => <GuardLine caught={c} label={`The change to ${props.path.split("/").pop()} couldn't be shown`} />}>
+      <DiffViewDrawn {...props} />
+    </Guard>
+  );
 }
