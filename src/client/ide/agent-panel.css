@@ -249,6 +249,8 @@ html.dark .ia-foot-line { color: #929292; }
 .ia-chat .rsp-answer blockquote, .ia-chat .rsp-say blockquote { margin: .6em 0; padding: .4em .7em; }
 .ia-chat .rsp-answer [data-streamdown="inline-code"] { font-size: .92em; }
 .ia-chat .rsp-answer [data-streamdown="table"] :is(th, td), .ia-chat .rsp-say [data-streamdown="table"] :is(th, td) { font-size: 12px; }
+/* A table's first column wraps like the rest: its cell was nowrap and capped at 340px, so its text ran into the next column. */
+.ia-chat .rsp-answer [data-streamdown="table"] :is(th, td):first-child { white-space: normal; max-width: none; }
 .ia-chat .file-chip { padding: 0 5px 0 4px; font-size: 12px; }
 
 /* Your own words: a right-aligned bubble, narrower. */
