@@ -457,7 +457,7 @@ export function RoomProfile({ identity, state, events, send, notify }: { identit
           )}
         </ul>
       </div>
-      {/* Its project (splashxmoon/friday#24) heads its folders, where the work is (Arun, 2026-11-17: "move the projects thing under the
+      {/* Its project (splashxmoon/friday-code#24) heads its folders, where the work is (Arun, 2026-11-17: "move the projects thing under the
           folders category and rename the category"): a crew's own rooms, not the Crew room or a hosted team's. */}
       {!crew && <RoomFolders identity={identity} room={r!} members={members.map((x) => x.m)} patch={patch} notify={notify} {...(withProject ? { project: { now: r!.project ? showProject(r!.project) : "No project", open: () => setPage("project") } } : {})} />}
       <div className="msd-group">
@@ -499,7 +499,7 @@ export function RoomProfile({ identity, state, events, send, notify }: { identit
 }
 
 /**
- * A room's project, as a page of its profile (splashxmoon/friday#24): the repo and branch, changed here, and where each crew mate
+ * A room's project, as a page of its profile (splashxmoon/friday-code#24): the repo and branch, changed here, and where each crew mate
  * in it stands with it on its own computer: its copy, more than one, none, the branch missing, or not checked. A reference only:
  * nothing is cloned or switched; new tasks go by it and tasks already made keep the one they were made under.
  */

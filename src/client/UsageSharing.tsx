@@ -16,7 +16,7 @@ import { Switch } from "@/components/ui/switch";
 type State = { on: boolean; told: boolean; offBy: string | null };
 
 /** Where the README says exactly what is sent. */
-export const WHAT = "https://github.com/splashxmoon/friday#privacy";
+export const WHAT = "https://github.com/splashxmoon/friday-code#privacy";
 
 let now: State | null = null;
 const subs = new Set<() => void>();

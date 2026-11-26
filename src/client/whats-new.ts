@@ -29,10 +29,10 @@ export const WHATS_NEW: WhatsNewNotes = {
 };
 
 /** The open-source repository, to star (2026-11-25: "I want more users and stars and contributors"). */
-export const REPO_URL = "https://github.com/splashxmoon/friday";
+export const REPO_URL = "https://github.com/splashxmoon/friday-code";
 
 /** The release's own page, for everything else it changed. */
-export const notesUrl = (version: string) => `https://github.com/splashxmoon/friday/releases/tag/v${version}`;
+export const notesUrl = (version: string) => `https://github.com/splashxmoon/friday-code/releases/tag/v${version}`;
 
 /** A version as its release is tagged: 0.2.10-mine.202611040538 is 0.2.10. */
 export const releaseOf = (version: string) => version.trim().replace(/^v/, "").replace(/[-+].*$/, "");

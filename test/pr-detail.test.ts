@@ -24,7 +24,7 @@ const GH = {
   assignees: [{ login: "splashxmoon", name: "Arun Dass" }],
   reviewRequests: [{ __typename: "User", login: "kit-dev" }, { __typename: "Team", name: "Core", slug: "core" }],
   latestReviews: [{ author: { login: "splashxmoon" }, body: "thanks, exactly what #3 asked for", submittedAt: "2026-11-02T23:38:40Z", state: "COMMENTED" }, { author: { login: "kit-dev" }, body: "", submittedAt: "2026-11-02T23:39:00Z", state: "APPROVED" }],
-  closingIssuesReferences: [{ number: 3, repository: { name: "friday", owner: { login: "splashxmoon" } }, url: "https://github.com/splashxmoon/friday/issues/3" }],
+  closingIssuesReferences: [{ number: 3, repository: { name: "friday-code", owner: { login: "splashxmoon" } }, url: "https://github.com/splashxmoon/friday-code/issues/3" }],
   commits: [
     { authoredDate: "2026-11-02T22:59:13Z", authors: [{ email: "someone@example.com", login: "yudhapakel", name: "Yudha" }], committedDate: "2026-11-02T22:59:13Z", messageHeadline: "test: add unit tests", oid: "90380453483a9b93101a3264da2fa4712f53dddf" },
   ],
@@ -47,7 +47,7 @@ test("gh's pull request is read into what the panel draws, with nobody's email",
   assert.equal(d.mergeCommit, "aa09b005627949f3e98268423e7edc71db692336");
   assert.equal(d.mergedAt, Date.parse("2026-11-02T23:42:09Z"));
   assert.deepEqual(d.labels, [{ name: "tests", color: "0e8a16" }, { name: "bad color", color: "888888" }]);
-  assert.deepEqual(d.closes, [{ number: 3, url: "https://github.com/splashxmoon/friday/issues/3", repo: "splashxmoon/friday" }]);
+  assert.deepEqual(d.closes, [{ number: 3, url: "https://github.com/splashxmoon/friday-code/issues/3", repo: "splashxmoon/friday-code" }]);
   // Each reviewer's last say, then those asked who haven't answered: the approval stands for kit-dev, the team is asked.
   assert.deepEqual(d.reviewers.map((r) => [r.who.login, r.state]), [["splashxmoon", "commented"], ["kit-dev", "approved"], ["core", "pending"]]);
   assert.equal(d.reviewers[0]!.body, "thanks, exactly what #3 asked for");

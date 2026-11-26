@@ -964,7 +964,7 @@ const hostOf = (url: string) => {
 };
 /** Address parts that say nothing about the page: `item?id=4123`, `/videos`, `/watch`. */
 const GENERIC = /^(item|items|index|view|watch|page|pages|post|posts|p|a|videos?|about|home|en|en-us|docs?|wiki|article|story|status|s|r|c|w)$/i;
-/** A page with no title of its own, by the words its address names it with (github.com/splashxmoon/friday is "Friday",
+/** A page with no title of its own, by the words its address names it with (github.com/splashxmoon/friday-code is "Friday",
  *  youtube.com/@anthropic-ai/videos is "Anthropic ai"), else its site; never its path as written. */
 const pageWords = (s: Source) => {
   if (s.title) return s.title;

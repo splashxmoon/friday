@@ -626,7 +626,7 @@ export async function issues(): Promise<GithubIssues> {
 
 /**
  * Everybody else's open pull requests in the repos you work in: every repo of your own (`owner`, searched as user:), whether or
- * not you ever sent a pull request there (Arun, 2026-11-19: an outside contributor's #31 on splashxmoon/friday never showed), and
+ * not you ever sent a pull request there (Arun, 2026-11-19: an outside contributor's #31 on splashxmoon/friday-code never showed), and
  * the other repos named. Two searches when there are both, newest first, each pull request once.
  */
 export async function teamPullRequests(repos: string[], owner = ""): Promise<{ team: PullRequest[] }> {

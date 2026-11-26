@@ -1,4 +1,4 @@
-/* A room's Project (splashxmoon/friday#24, RoomProject.tsx), chosen in the folder picker refined for repos (Workspace.tsx
+/* A room's Project (splashxmoon/friday-code#24, RoomProject.tsx), chosen in the folder picker refined for repos (Workspace.tsx
    RepoPicker, `.rpk`). In the room dialog: the repo as a box that opens it, its × for No project, and the branch beside it. On
    the profile: rows like its Folders, the branch edited in place, saved as it changes (Arun, 2026-11-17: "redesign this better"). */
 .rpj > span .rpj-opt { margin-left: 4px; color: var(--text-muted); font-style: normal; font-weight: 400; }

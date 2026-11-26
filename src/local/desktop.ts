@@ -1,5 +1,5 @@
 /**
- * Friday's desktop app, the open-source edition: the same Friday as `npx github:splashxmoon/friday` (start.ts), in a window of
+ * Friday's desktop app, the open-source edition: the same Friday as `npx github:splashxmoon/friday-code` (start.ts), in a window of
  * its own instead of a browser tab. Built by scripts/build-local-desktop.mts and packaged by electron-builder; released from
  * GitHub Actions (.github/workflows/release.yml).
  */

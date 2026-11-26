@@ -23,7 +23,7 @@ body:
       label: How you run Friday
       options:
         - Desktop app
-        - npx github:splashxmoon/friday
+        - npx github:splashxmoon/friday-code
         - A clone (npm start)
     validations:
       required: true

@@ -6,7 +6,7 @@
  * It says which Friday and which system, so a report can be acted on, and nothing else: no name, no folder, no session. The
  * person reads all of it on GitHub before anything is sent, and sends it from their own account.
  */
-export const ISSUES = "https://github.com/splashxmoon/friday/issues/new";
+export const ISSUES = "https://github.com/splashxmoon/friday-code/issues/new";
 
 /** "macOS", "Windows" or "Linux", from Node's process.platform or the browser's navigator.platform. */
 export function osName(platform: string): string {

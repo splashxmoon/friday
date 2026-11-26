@@ -21,5 +21,5 @@ test("the notes fit the sheet", () => {
   assert.match(WHATS_NEW.version, /^\d+\.\d+\.\d+$/);
   assert.ok(WHATS_NEW.items.length >= 1 && WHATS_NEW.items.length <= 4);
   for (const it of WHATS_NEW.items) assert.ok(it.title.length <= 26, `"${it.title}" fits on one line in half the sheet`);
-  assert.equal(notesUrl("0.2.10"), "https://github.com/splashxmoon/friday/releases/tag/v0.2.10");
+  assert.equal(notesUrl("0.2.10"), "https://github.com/splashxmoon/friday-code/releases/tag/v0.2.10");
 });

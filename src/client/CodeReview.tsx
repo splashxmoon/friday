@@ -159,7 +159,7 @@ export function CodeReview({
   const error = prsError || (filter === "team" ? teamError : "");
   useEffect(() => {
     // Your login too: every repo of yours is your team's, a pull request of yours there or not (an outside contributor's on
-    // splashxmoon/friday never showed, Arun 2026-11-19). A runner from before that ignores it.
+    // splashxmoon/friday-code never showed, Arun 2026-11-19). A runner from before that ignores it.
     const owner = prs?.account ?? "";
     if (!linked || (!repos.length && !owner)) return;
     let live = true;

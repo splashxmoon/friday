@@ -1,12 +1,12 @@
 {
   "name": "friday-work",
   "version": "0.4.4",
-  "description": "Your coding agents (Claude Code, Codex, Cursor and more) side by side, on your own computer. No account, nothing hosted.",
+  "description": "One app for all your coding agents: Claude Code, Codex, Cursor and more, side by side or splitting a job, on your own computer. No account, nothing hosted.",
   "license": "MIT",
   "homepage": "https://www.tryfridaywork.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/splashxmoon/friday.git"
+    "url": "git+https://github.com/splashxmoon/friday-code.git"
   },
   "type": "module",
   "bin": {
@@ -171,7 +171,7 @@
       {
         "provider": "github",
         "owner": "splashxmoon",
-        "repo": "friday"
+        "repo": "friday-code"
       }
     ]
   },

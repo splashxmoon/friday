@@ -5,26 +5,29 @@
 <h1 align="center">Friday</h1>
 
 <p align="center">
-  <strong>Your coding agents, working together as one team.</strong><br/>
-  Claude Code, Codex, Cursor and 15 more talk to each other, split the work and check each other's work. Free, open source, on your own computer.
+  <strong>One app for all your coding agents.</strong><br/>
+  Claude Code, Codex, Cursor and 15 more, on the subscriptions you already pay for. Run them side by side, or hand them a job: they split it, review each other's work, and pick up when one runs out. Free and open source, on your own computer.
 </p>
 
+<p align="center"><sub><b>English</b> · <a href="docs/readme/README.zh-CN.md">简体中文</a> · <a href="docs/readme/README.zh-TW.md">繁體中文</a> · <a href="docs/readme/README.ja.md">日本語</a> · <a href="docs/readme/README.ko.md">한국어</a> · <a href="docs/readme/README.vi.md">Tiếng Việt</a> · <a href="docs/readme/README.es.md">Español</a> · <a href="docs/readme/README.pt-BR.md">Português</a> · <a href="docs/readme/README.fr.md">Français</a> · <a href="docs/readme/README.de.md">Deutsch</a> · <a href="docs/readme/README.ru.md">Русский</a></sub></p>
+
 <p align="center">
-  <a href="https://github.com/splashxmoon/friday/stargazers"><img src="https://img.shields.io/github/stars/splashxmoon/friday?style=flat&label=%E2%98%85&color=08C" alt="GitHub stars" /></a>
+  <a href="https://github.com/splashxmoon/friday-code/stargazers"><img src="https://img.shields.io/github/stars/splashxmoon/friday-code?style=flat&label=%E2%98%85&color=08C" alt="GitHub stars" /></a>
   <img src="https://img.shields.io/badge/license-MIT-08C?style=flat" alt="License: MIT" />
   <img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-4493F8?style=flat" alt="macOS, Windows and Linux" />
-  <a href="https://github.com/splashxmoon/friday/actions/workflows/ci.yml"><img src="https://github.com/splashxmoon/friday/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/splashxmoon/friday-code/actions/workflows/ci.yml"><img src="https://github.com/splashxmoon/friday-code/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
 </p>
+
 
 <p align="center">
-  <a href="https://github.com/splashxmoon/friday/releases/latest/download/Friday-arm64.dmg"><b>Mac (Apple silicon)</b></a> ·
-  <a href="https://github.com/splashxmoon/friday/releases/latest/download/Friday-x64.dmg"><b>Mac (Intel)</b></a> ·
-  <a href="https://github.com/splashxmoon/friday/releases/latest/download/Friday-Setup.exe"><b>Windows</b></a> ·
-  <a href="https://github.com/splashxmoon/friday/releases/latest/download/Friday-x86_64.AppImage"><b>Linux</b></a>
-  <br/>or, with Node.js 22: <code>npx github:splashxmoon/friday</code>
+  <a href="https://github.com/splashxmoon/friday-code/releases/latest/download/Friday-arm64.dmg"><b>Mac (Apple silicon)</b></a> ·
+  <a href="https://github.com/splashxmoon/friday-code/releases/latest/download/Friday-x64.dmg"><b>Mac (Intel)</b></a> ·
+  <a href="https://github.com/splashxmoon/friday-code/releases/latest/download/Friday-Setup.exe"><b>Windows</b></a> ·
+  <a href="https://github.com/splashxmoon/friday-code/releases/latest/download/Friday-x86_64.AppImage"><b>Linux</b></a>
+  <br/>or, with Node.js 22: <code>npx github:splashxmoon/friday-code</code>
 </p>
 
-<p align="center"><sub>If Friday saves you time, a ⭐ helps other people find it.</sub></p>
+<p align="center"><sub>If Friday saves you time, a ⭐ helps other people find it. Want to help build it? <a href="#contributing">Start here</a>.</sub></p>
 
 <p align="center">
   <img src="docs/assets/site/hero.png" alt="Friday on a sample storefront project: the checkout-v2 thread with a team of three, Amp and Claude Code 2 working while Codex answers whether 3-D Secure is covered by a test, and the Agents panel showing who is done and who is working" width="960" />
@@ -68,7 +71,7 @@ Your editor, terminal and extensions, with every agent's chat beside them. Edit 
 ## Get started in five minutes
 
 1. **Sign in to one coding tool** you already use, for example `claude auth login` or `codex login`.
-2. **Install Friday** with a download link above, or run `npx github:splashxmoon/friday` with Node.js 22.
+2. **Install Friday** with a download link above, or run `npx github:splashxmoon/friday-code` with Node.js 22.
 3. **Open it.** Friday lists the coding tools it found on your computer.
 4. **Start a session** in your repo and give it a job.
 5. **Review what changed** and keep what you like.
@@ -177,20 +180,20 @@ Keep AI teammates on your computer, each with a name, a role, a memory and its o
 
 | | |
 | --- | --- |
-| Mac, Apple silicon | [Friday-arm64.dmg](https://github.com/splashxmoon/friday/releases/latest/download/Friday-arm64.dmg) |
-| Mac, Intel | [Friday-x64.dmg](https://github.com/splashxmoon/friday/releases/latest/download/Friday-x64.dmg) |
-| Windows | [Friday-Setup.exe](https://github.com/splashxmoon/friday/releases/latest/download/Friday-Setup.exe) |
-| Linux | [Friday-x86_64.AppImage](https://github.com/splashxmoon/friday/releases/latest/download/Friday-x86_64.AppImage) (`chmod +x` it, then run it) |
+| Mac, Apple silicon | [Friday-arm64.dmg](https://github.com/splashxmoon/friday-code/releases/latest/download/Friday-arm64.dmg) |
+| Mac, Intel | [Friday-x64.dmg](https://github.com/splashxmoon/friday-code/releases/latest/download/Friday-x64.dmg) |
+| Windows | [Friday-Setup.exe](https://github.com/splashxmoon/friday-code/releases/latest/download/Friday-Setup.exe) |
+| Linux | [Friday-x86_64.AppImage](https://github.com/splashxmoon/friday-code/releases/latest/download/Friday-x86_64.AppImage) (`chmod +x` it, then run it) |
 
 On a Mac, Homebrew installs it too:
 
 ```bash
-brew tap splashxmoon/friday https://github.com/splashxmoon/friday
-brew trust splashxmoon/friday
+brew tap splashxmoon/friday-code https://github.com/splashxmoon/friday-code
+brew trust splashxmoon/friday-code
 brew install --cask friday
 ```
 
-Every version is on the [releases page](https://github.com/splashxmoon/friday/releases). The app is Friday in a window of its own, with the same server inside it, on `127.0.0.1` only.
+Every version is on the [releases page](https://github.com/splashxmoon/friday-code/releases). The app is Friday in a window of its own, with the same server inside it, on `127.0.0.1` only.
 
 The Mac app is signed and notarized by Apple, so it opens like any other.
 
@@ -202,14 +205,14 @@ The Mac app is signed and notarized by Apple, so it opens like any other.
 With Node.js 22 or newer and Git:
 
 ```bash
-npx github:splashxmoon/friday
+npx github:splashxmoon/friday-code
 ```
 
 Friday opens in your browser at `http://127.0.0.1:4321`. To keep a copy:
 
 ```bash
-git clone https://github.com/splashxmoon/friday
-cd friday
+git clone https://github.com/splashxmoon/friday-code
+cd friday-code
 npm install
 npm start
 ```
@@ -279,7 +282,18 @@ Not through Friday. It runs on `127.0.0.1` with no account; your coding tools ta
 
 ## Contributing
 
-Issues and pull requests are welcome: [good first issues](https://github.com/splashxmoon/friday/labels/good%20first%20issue) · [CONTRIBUTING.md](CONTRIBUTING.md). To build it: `npm install`, `npm test`, `npm run desktop`.
+Friday is built in the open and every pull request gets a reply within a day. Good places to start:
+
+- **Add a coding tool.** Most tools are a short adapter: [goose](https://github.com/splashxmoon/friday-code/issues/36), [Auggie](https://github.com/splashxmoon/friday-code/issues/37), [Aider](https://github.com/splashxmoon/friday-code/issues/38) and [Crush](https://github.com/splashxmoon/friday-code/issues/39) are waiting, and [the guide](docs/adding-a-coding-tool.md) walks through one.
+- **Package it.** [Scoop](https://github.com/splashxmoon/friday-code/issues/41) for Windows, [the AUR](https://github.com/splashxmoon/friday-code/issues/40) for Arch.
+- **Try it and report.** [The Linux AppImage on your distro](https://github.com/splashxmoon/friday-code/issues/4), [MCP sign-in on Windows and Linux](https://github.com/splashxmoon/friday-code/issues/26).
+- **Something else?** [Start here](https://github.com/splashxmoon/friday-code/issues/42), the [good first issues](https://github.com/splashxmoon/friday-code/labels/good%20first%20issue), or an idea in [Discussions](https://github.com/splashxmoon/friday-code/discussions).
+
+To build it: `npm install`, `npm start` (or `npm run desktop`), `npm test`. [CONTRIBUTING.md](CONTRIBUTING.md) has the rest. Every release note thanks the people whose work is in it.
+
+Thanks to everyone who has helped build Friday:
+
+<a href="https://github.com/splashxmoon/friday-code/graphs/contributors"><img src="https://contrib.rocks/image?repo=splashxmoon/friday-code" alt="Friday's contributors" /></a>
 
 If Friday saves you time, a ⭐ helps other developers find it.
 

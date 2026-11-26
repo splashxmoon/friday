@@ -621,7 +621,7 @@ function LocalShell({ id, cwd, run, afterPrompt = false, onOutput, onOpenFile }:
 
 /**
  * A coding tool's sign-in, run in a shell of Friday's own under its row in Settings › Coding tools, rather than in a terminal window
- * that could open hidden or behind others (splashxmoon/friday#21; Arun, 2026-11-10: "Build all four", after T3 Code, whose
+ * that could open hidden or behind others (splashxmoon/friday-code#21; Arun, 2026-11-10: "Build all four", after T3 Code, whose
  * sign-ins run in its own page). This computer's shell (the desktop app's), whatever computer a session open elsewhere is on.
  */
 export function SignInShell({ id, run, onEnd }: { id: string; run: string; /** Its shell ended: the sign-in's command is over (its line ends the shell with it). */ onEnd?: () => void }) {

@@ -207,7 +207,7 @@ export interface Room {
    */
   work?: { cwd: string; carry?: boolean; from: string };
   /**
-   * The repo its work is on, and the branch that work starts from (splashxmoon/friday#24): a reference each crew mate's own copy
+   * The repo its work is on, and the branch that work starts from (splashxmoon/friday-code#24): a reference each crew mate's own copy
    * is found by (room-project.ts), never a checkout or the room's folder. Absent: No project. Named rooms only, not threads.
    */
   project?: RoomProject;
