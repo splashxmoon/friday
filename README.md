@@ -244,9 +244,6 @@ It talks to GitHub for the pull requests, issues and skills you ask it about. Ea
 **How do I run Claude Code and Codex at the same time on one project?**
 Start a session in your repository with one of them, then add the other from the session's agent bar. Each can work in its own copy of the repository (a Git worktree), so they don't overwrite each other, and Friday keeps them talking.
 
-**Coming from Conductor?**
-Friday does the same job (several coding agents in parallel, each in its own git worktree), and its agents also talk to each other, share one board and review each other's work. It runs locally on macOS, Windows and Linux, with no account or cloud to shut down, and it's MIT licensed, so it stays yours.
-
 **Is this a multi-agent framework I have to code against?**
 No. Friday drives the coding CLIs you already use, as they are. There's nothing to write: you pick the tools and give them the job.
 
