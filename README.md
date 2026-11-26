@@ -5,8 +5,8 @@
 <h1 align="center">Friday</h1>
 
 <p align="center">
-  <strong>Your coding agents, working together as one team.</strong><br/>
-  Claude Code, Codex, Cursor and 15 more talk to each other, split the work and check each other's work. Free, open source, on your own computer.
+  <strong>One app for all your coding agents.</strong><br/>
+  Claude Code, Codex, Cursor and 15 more, on the subscriptions you already pay for. Run them side by side, or hand them a job: they split it, review each other's work, and pick up when one runs out. Free and open source, on your own computer.
 </p>
 
 <p align="center">

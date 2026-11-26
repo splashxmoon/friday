@@ -7,7 +7,7 @@ cask "friday" do
   url "https://github.com/splashxmoon/friday-code/releases/latest/download/Friday-#{arch}.dmg",
       verified: "github.com/splashxmoon/friday-code/"
   name "Friday"
-  desc "Open-source harness for coding agents that work as a team"
+  desc "One app for all your coding agents"
   homepage "https://github.com/splashxmoon/friday-code"
 
   depends_on macos: :monterey

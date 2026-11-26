@@ -10,7 +10,7 @@ PackageName: Friday
 PackageUrl: https://github.com/splashxmoon/friday-code
 License: MIT
 LicenseUrl: https://github.com/splashxmoon/friday-code/blob/main/LICENSE
-ShortDescription: Open-source harness for coding agents that work as a team.
+ShortDescription: One app for all your coding agents.
 Description: |-
   Friday runs the coding agents you already use, such as Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot and OpenCode, as one team on your own computer.
   One agent splits a job into a task board and the others take parts of it, they message each other as they work, each can work in its own Git worktree, and a tool that runs out of usage hands its task to another.
