@@ -6,7 +6,7 @@ import { feedbackUrl, ISSUES, osName } from "../src/feedback.js";
 test("send feedback opens a new GitHub issue with the version and system filled in, and nothing of the person's", () => {
   const url = new URL(feedbackUrl({ version: "0.2.0", os: "macOS", app: true }));
   assert.equal(`${url.origin}${url.pathname}`, ISSUES);
-  assert.equal(ISSUES, "https://github.com/splashxmoon/friday/issues/new");
+  assert.equal(ISSUES, "https://github.com/splashxmoon/friday-code/issues/new");
   const body = url.searchParams.get("body") ?? "";
   assert.match(body, /\*\*What happened\*\*/);
   assert.match(body, /Friday 0\.2\.0 · macOS · desktop app$/);

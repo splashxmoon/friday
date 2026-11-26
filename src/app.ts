@@ -2510,7 +2510,7 @@ export async function createApp(o: AppOptions) {
   };
   /** Each room as the app shows it: who is in it (their lanes there) and how many of them are working or need the person. */
   /**
-   * Each room member's copy of the room's project (room-project.ts; splashxmoon/friday#24), on the computer it runs on: this one's
+   * Each room member's copy of the room's project (room-project.ts; splashxmoon/friday-code#24), on the computer it runs on: this one's
    * folders read with git, looked at again after ten seconds. Another computer's can't be read from here yet: away, a task on the
    * repo waits for it; linked, it may take the task and finds its own copy.
    */

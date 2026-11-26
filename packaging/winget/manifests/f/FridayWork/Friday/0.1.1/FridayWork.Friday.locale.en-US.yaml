@@ -4,12 +4,12 @@ PackageVersion: 0.1.1
 PackageLocale: en-US
 Publisher: Friday Work
 PublisherUrl: https://www.tryfridaywork.com
-PublisherSupportUrl: https://github.com/splashxmoon/friday/issues
+PublisherSupportUrl: https://github.com/splashxmoon/friday-code/issues
 Author: Arun Dass
 PackageName: Friday
-PackageUrl: https://github.com/splashxmoon/friday
+PackageUrl: https://github.com/splashxmoon/friday-code
 License: MIT
-LicenseUrl: https://github.com/splashxmoon/friday/blob/main/LICENSE
+LicenseUrl: https://github.com/splashxmoon/friday-code/blob/main/LICENSE
 ShortDescription: Open-source harness for coding agents that work as a team.
 Description: |-
   Friday runs the coding agents you already use, such as Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot and OpenCode, as one team on your own computer.
@@ -24,6 +24,6 @@ Tags:
   - cursor
   - developer-tools
   - multi-agent
-ReleaseNotesUrl: https://github.com/splashxmoon/friday/releases/tag/v0.1.1
+ReleaseNotesUrl: https://github.com/splashxmoon/friday-code/releases/tag/v0.1.1
 ManifestType: defaultLocale
 ManifestVersion: 1.10.0

@@ -1,5 +1,5 @@
 /**
- * A room's project: the repo its work is on, and the branch that work starts from (splashxmoon/friday#24, "Let a room name its
+ * A room's project: the repo its work is on, and the branch that work starts from (splashxmoon/friday-code#24, "Let a room name its
  * project repo"). A reference, never a checkout: the room doesn't clone, add the repo to anyone's folders, or switch a branch.
  * Each crew mate keeps its own folder; the room only finds which of them holds a copy of the repo, on the computer it runs on.
  */

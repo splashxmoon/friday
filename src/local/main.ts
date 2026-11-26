@@ -6,13 +6,13 @@
  * one folder (FRIDAY_HOME, else ~/.friday); and the work runs on your tools' own plans. Friday's own models aren't part of it.
  * The desktop app (desktop.ts) starts the same thing in a window of its own.
  *
- *   npx github:splashxmoon/friday   start it and open it in your browser
+ *   npx github:splashxmoon/friday-code   start it and open it in your browser
  *   PORT=4321 FRIDAY_HOME=…         where it listens, and where it keeps things
  *   --no-open                       don't open the browser
  *   --join '<friday://computer?…>'  be another computer's extra machine: pair with it once (its Settings › Your computers ›
  *                                   Add a computer), and keep its link; nothing opens
  *   … mcp                           Friday's MCP server on stdin and stdout, for an agent outside Friday (Claude Code, Codex,
- *                                   Cursor) to hand it work: `claude mcp add friday -- npx -y github:splashxmoon/friday mcp`
+ *                                   Cursor) to hand it work: `claude mcp add friday -- npx -y github:splashxmoon/friday-code mcp`
  */
 import { spawn } from "node:child_process";
 

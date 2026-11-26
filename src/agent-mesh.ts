@@ -821,7 +821,7 @@ export class AgentMesh {
    * kept on its own branch. `idle`: the agent isn't working now, so its folder can be switched; a busy one is told to switch
    * itself when it starts. Its line goes with the brief, and the branch on the task. Null where there is no copy to ready.
    */
-  /** A room's project, stamped on a board as it is posted there (room-project.ts; splashxmoon/friday#24). Null: none. */
+  /** A room's project, stamped on a board as it is posted there (room-project.ts; splashxmoon/friday-code#24). Null: none. */
   roomProject: ((sid: string) => Promise<RoomProject | null>) | null = null;
   /** Where a lane's crew mate stands with a project, on the computer it runs on. Undefined: the lane isn't a crew mate. */
   laneRepo: ((sid: string, lane: string, p: RoomProject) => Promise<MemberRepo | undefined>) | null = null;
@@ -2503,7 +2503,7 @@ Work to this from here.`, kind: "tell", system: true }).catch(() => undefined);
     /** Tasks a person handed to one agent, tried once this round (see `chosen` below). */
     const tried = new Set<string>();
     const skills = await this.skillsFor(state);
-    // On a project (room-project.ts; splashxmoon/friday#24): tasks go only to a crew mate with a copy of it. One a person gave to a
+    // On a project (room-project.ts; splashxmoon/friday-code#24): tasks go only to a crew mate with a copy of it. One a person gave to a
     // crew mate without one waits, saying why and who has it, and is never moved on by itself.
     const proj = b.project && this.laneRepo ? b.project : undefined;
     const repos = new Map<string, MemberRepo | undefined>();

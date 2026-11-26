@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: Questions and ideas
-    url: https://github.com/splashxmoon/friday/discussions
+    url: https://github.com/splashxmoon/friday-code/discussions
     about: Ask how something works or share what you're building with Friday.
   - name: Friday Team (hosted, for several people)
     url: https://www.tryfridaywork.com/team

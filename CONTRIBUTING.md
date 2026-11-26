@@ -7,7 +7,7 @@ Thanks for helping. Bug fixes, support for another coding tool, better docs and 
 You need Node.js 22 or newer and Git. No database or other service: the tests run on the same in-memory store Friday uses.
 
 ```bash
-git clone https://github.com/splashxmoon/friday
+git clone https://github.com/splashxmoon/friday-code
 cd friday
 npm install
 npm start            # Friday in your browser, from this folder
@@ -46,7 +46,7 @@ For tools that do not speak ACP (such as Claude Code, Codex, or Cursor), see [`d
 
 ## Good first issues
 
-Look for the [good first issue](https://github.com/splashxmoon/friday/labels/good%20first%20issue) label. Say in the issue that you are taking one, so two people don't do the same work.
+Look for the [good first issue](https://github.com/splashxmoon/friday-code/labels/good%20first%20issue) label. Say in the issue that you are taking one, so two people don't do the same work.
 
 ## Pull requests
 

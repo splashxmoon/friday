@@ -6,7 +6,7 @@
   "homepage": "https://www.tryfridaywork.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/splashxmoon/friday.git"
+    "url": "git+https://github.com/splashxmoon/friday-code.git"
   },
   "type": "module",
   "bin": {
@@ -171,7 +171,7 @@
       {
         "provider": "github",
         "owner": "splashxmoon",
-        "repo": "friday"
+        "repo": "friday-code"
       }
     ]
   },

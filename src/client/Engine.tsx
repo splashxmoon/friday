@@ -85,7 +85,7 @@ export function ConnectDialog({
   const [model, setModel] = useState(existing?.model ?? "");
   /**
    * One of your own models (Settings › Models), picked as the agent: Friday's agent on that model, working in the folder, as Add an
-   * agent's "Your models" rows have it (model-lane-add.tsx). The message box offered these, this dialog didn't (splashxmoon/friday#32).
+   * agent's "Your models" rows have it (model-lane-add.tsx). The message box offered these, this dialog didn't (splashxmoon/friday-code#32).
    * Only the session owner's, as the runtime runs no one else's; "" when a coding tool (or Friday Code) is the agent.
    */
   const ownModels = useOwnModels(identity);

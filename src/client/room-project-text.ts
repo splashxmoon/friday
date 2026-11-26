@@ -1,7 +1,7 @@
 import { isFolderProject, repoName, type MemberRepo, type RoomProject } from "../room-project.js";
 
 /**
- * A room's Project in words (splashxmoon/friday#24): the words the room dialog, the profile and the board's
+ * A room's Project in words (splashxmoon/friday-code#24): the words the room dialog, the profile and the board's
  * pages share, apart from its chooser (RoomProject.tsx).
  */
 

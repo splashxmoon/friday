@@ -2214,7 +2214,7 @@ export const opencode: Adapter = acp({
 // Kilo asks before a command by itself, and its plan mode only reads. On Windows its ACP server opened a conversation and then never
 // answered an instruction (7.8.8 to 7.8.28): every model request runs `git config` with Kilo's stdin, and on Windows that git
 // waits for a line from it (Kilo-Org/kilocode#10768, their fix #15374 not yet merged). A blank line while the instruction waits
-// lets it on (the nudge), so Kilo runs on Windows too (splashxmoon/friday#20, #22).
+// lets it on (the nudge), so Kilo runs on Windows too (splashxmoon/friday-code#20, #22).
 export const kilo: Adapter = acp({
   tool: "kilo",
   bins: ["kilo"],

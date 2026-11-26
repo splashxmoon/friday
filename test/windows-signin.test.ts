@@ -1,4 +1,4 @@
-// splashxmoon/friday#21: Antigravity's sign-in on Windows said "Opening the sign-in…" for good. A sign-in in a terminal window now
+// splashxmoon/friday-code#21: Antigravity's sign-in on Windows said "Opening the sign-in…" for good. A sign-in in a terminal window now
 // waits on its own tool, as a sign-in page does, and Windows opens that window with the command as written.
 import assert from "node:assert/strict";
 import { test } from "node:test";

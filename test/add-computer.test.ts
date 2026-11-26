@@ -12,7 +12,7 @@ const LINK = `friday://computer?${new URLSearchParams({ h: "192.168.1.180,100.88
 
 test("one command to paste on the other machine, quoted for its shell; a link that could end the quote is refused", () => {
   assert.ok(JOIN_LINK.test(LINK), LINK);
-  assert.deepEqual(joinCommand(LINK), { unix: `npx -y github:splashxmoon/friday --join '${LINK}'`, windows: `npx -y github:splashxmoon/friday --join "${LINK}"` });
+  assert.deepEqual(joinCommand(LINK), { unix: `npx -y github:splashxmoon/friday-code --join '${LINK}'`, windows: `npx -y github:splashxmoon/friday-code --join "${LINK}"` });
   assert.throws(() => joinCommand("friday://computer?h=x'; rm -rf ~; '"), /isn't a link/);
   assert.throws(() => joinCommand("https://evil.example/x"), /isn't a link/);
 });

@@ -987,7 +987,7 @@ export type EventBody =
    */
   | { type: "board.posted"; fromLane: string; fromName: string; tasks: BoardTaskDef[]; /** Put to the person first (Arun, 2026-11-16, "Do 5"): nothing is handed out until they start it (board.started). */ proposed?: true; /** What proves a task works, run in its agent's folder when it is done (each task's own `check` first). */ check?: string; /** Whose work it is, when Friday posts it for a person (a hosted crew workflow's owner): its hand-outs carry them (own-plan.ts). */ by?: { id: string; name: string }; /** The room's project as the board was posted (room-project.ts): its tasks go only to a crew mate with a copy of it, and keep this one if the room's changes. */ project?: { repo: string; branch?: string } }
   /**
-   * Why a ready task isn't handed out yet, said once each time it changes (splashxmoon/friday#24): the crew mate it was given to has
+   * Why a ready task isn't handed out yet, said once each time it changes (splashxmoon/friday-code#24): the crew mate it was given to has
    * no copy of the board's project, or no crew mate has. Empty: nothing holds it any more.
    */
   | { type: "board.waiting"; id: string; why: string }

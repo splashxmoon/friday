@@ -33,7 +33,7 @@ test("a crew mate keeps its own routines with manage_routine; another session na
   // From Ivy's own chat: its own routine, nobody named.
   const asIvy = (args: Record<string, unknown>) => app.mesh.call(team.sid, ivy.lane, "manage_routine", args);
   assert.match((await asIvy({ action: "list" })).output, /Ivy has no routines yet/);
-  const does = "Count the installer downloads of splashxmoon/friday and say the change since yesterday.";
+  const does = "Count the installer downloads of splashxmoon/friday-code and say the change since yesterday.";
   const made = await asIvy({ action: "create", name: "Daily downloads update", does, at: "9:00" });
   assert.ok(!made.isError, made.output);
   assert.match(made.output, /Made Ivy's routine "Daily downloads update" \[id [\w-]+\]: every day at 09:00, in Ivy's own chat, next /);

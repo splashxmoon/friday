@@ -5,13 +5,13 @@ Friday supports multiple AI coding tools. When a tool natively implements the Ag
 This document walks through the architecture of coding tool integration in Friday (evaluated at commit `7abfb71b06c15b4464965fe0107d1e5bde6561c1`). It covers:
 1. The **three essential places** every new tool must touch (`src/types.ts`, `src/client/BrandMarks.tsx`, and `src/runner/adapters.ts`).
 2. The core non-ACP `Adapter` architecture (auth lifecycle, process spawning, `stdio` streaming, output parsing, and permission mode mappings).
-3. Worked examples from existing tools, including Qwen Code's integration ([PR #10](https://github.com/splashxmoon/friday/pull/10)).
+3. Worked examples from existing tools, including Qwen Code's integration ([PR #10](https://github.com/splashxmoon/friday-code/pull/10)).
 
 ---
 
 ## 1. The Three Integration Points
 
-Regardless of whether a tool speaks ACP or uses a custom CLI adapter, registering a new tool in Friday requires entries in three places across the codebase. [PR #10](https://github.com/splashxmoon/friday/pull/10) (which added Qwen Code) serves as a canonical reference.
+Regardless of whether a tool speaks ACP or uses a custom CLI adapter, registering a new tool in Friday requires entries in three places across the codebase. [PR #10](https://github.com/splashxmoon/friday-code/pull/10) (which added Qwen Code) serves as a canonical reference.
 
 ### 1.1 Type Definitions and Metadata (`src/types.ts`)
 

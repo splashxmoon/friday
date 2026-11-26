@@ -10,7 +10,7 @@ UpgradeBehavior: install
 ReleaseDate: 2026-10-26
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/splashxmoon/friday/releases/download/v0.1.1/Friday-Setup.exe
+    InstallerUrl: https://github.com/splashxmoon/friday-code/releases/download/v0.1.1/Friday-Setup.exe
     InstallerSha256: 27DE73549E1CB8EBAED5CA972F70C933CCCBF912B55CCB0026610515719054E4
 ManifestType: installer
 ManifestVersion: 1.10.0

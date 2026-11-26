@@ -201,7 +201,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
     // Only after it was seen signed out first: switching account signs out and then in, and a refresh that has not caught
     // up yet would otherwise read "still signed in" as "finished".
     // A sign-in in a terminal window waits on its own tool the same way: it waited on every tool being signed in, so with Claude
-    // Code still signed out, Antigravity's row said "Opening the sign-in…" for good after it had signed in (splashxmoon/friday#21).
+    // Code still signed out, Antigravity's row said "Opening the sign-in…" for good after it had signed in (splashxmoon/friday-code#21).
     const waiting = !!signInUrl || !!signInCmd || signInBrowser || !!signInShell;
     const pending = tools.find((t) => t.tool === signInTool);
     if (!waiting) sawSignedOut.current = false;

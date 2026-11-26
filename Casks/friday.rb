@@ -4,11 +4,11 @@ cask "friday" do
   version :latest
   sha256 :no_check
 
-  url "https://github.com/splashxmoon/friday/releases/latest/download/Friday-#{arch}.dmg",
-      verified: "github.com/splashxmoon/friday/"
+  url "https://github.com/splashxmoon/friday-code/releases/latest/download/Friday-#{arch}.dmg",
+      verified: "github.com/splashxmoon/friday-code/"
   name "Friday"
   desc "Open-source harness for coding agents that work as a team"
-  homepage "https://github.com/splashxmoon/friday"
+  homepage "https://github.com/splashxmoon/friday-code"
 
   depends_on macos: :monterey
 

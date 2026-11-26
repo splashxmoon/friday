@@ -1,4 +1,4 @@
-// Kilo on Windows (splashxmoon/friday#20, #22): its ACP server runs `git config` on every model request with Kilo's own stdin, and
+// Kilo on Windows (splashxmoon/friday-code#20, #22): its ACP server runs `git config` on every model request with Kilo's own stdin, and
 // on Windows that git waits for a line from it, so an instruction never got an answer (Kilo-Org/kilocode#10768). While an instruction
 // waits, Friday sends a blank line every half second, and stops once it is answered. Nowhere else: on macOS and Linux nothing changes.
 import assert from "node:assert/strict";

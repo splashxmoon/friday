@@ -8,7 +8,7 @@
  * - over SSH, with this computer's own ssh (its ~/.ssh/config, keys and agent): Friday installs the open-source Friday there in a
  *   folder of its own, pairs it with this one, and leaves it running as a service (systemd, launchd) that comes back after a
  *   restart, and stops for good when it is removed here;
- * - with one command to paste in a terminal there, any system with Node.js 22: `npx -y github:splashxmoon/friday --join '…'`.
+ * - with one command to paste in a terminal there, any system with Node.js 22: `npx -y github:splashxmoon/friday-code --join '…'`.
  *
  * Either way the machine runs headless and holds a link here, pinned to this computer's certificate, over Wi-Fi or Tailscale, as
  * a computer paired by the app does: its coding tools show up in "runs on" for Code sessions and teammates. Nothing goes
@@ -19,7 +19,7 @@
 export const JOIN_LINK = /^friday:\/\/computer\?[\w=&%.:,~+-]{10,1500}$/;
 
 /** The package the extra machine runs: the open-source Friday, from its repository. */
-export const PACKAGE = "github:splashxmoon/friday";
+export const PACKAGE = "github:splashxmoon/friday-code";
 
 /** The one command to paste on the other machine, for its shell. */
 export function joinCommand(link: string): { unix: string; windows: string } {

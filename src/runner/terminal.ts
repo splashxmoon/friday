@@ -13,7 +13,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
  * How Windows opens a terminal window running `command`: cmd's `start`, in a window of its own that stays open. Given to cmd as
  * written (windowsVerbatimArguments): Node's own quoting (\" inside quotes) is not cmd's, so a path with a space in it came out
  * broken. `/s` drops the quotes round what follows /c, and the extra pair round the command does the same for `cmd /k`, so a quoted
- * "C:\Program Files\…" survives both (splashxmoon/friday#21).
+ * "C:\Program Files\…" survives both (splashxmoon/friday-code#21).
  */
 export function windowsTerminalArgs(command: string): string[] {
   return ["/d", "/s", "/c", `"start "" cmd /k "${command}""`];

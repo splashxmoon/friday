@@ -12,7 +12,7 @@ export const CLIENT_ENTRY = path.join(here, "client", "main.tsx");
  */
 /**
  * `@/…` is src/client/… (tsconfig.json paths). esbuild applies a tsconfig's paths only to files outside node_modules, and run as
- * `npx github:splashxmoon/friday` the whole app is inside node_modules, so every `@/` import failed to resolve there: resolved
+ * `npx github:splashxmoon/friday-code` the whole app is inside node_modules, so every `@/` import failed to resolve there: resolved
  * here instead, wherever the code sits.
  */
 const clientAlias: Plugin = {

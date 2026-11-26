@@ -10,7 +10,7 @@ import { SignInShell } from "./Terminal.js";
 
 /**
  * A sign-in that opened in a terminal window: finish it there, and the row updates by itself. If no window showed (a window
- * hidden behind others, or a terminal that couldn't be started), the same command runs from any terminal (splashxmoon/friday#21).
+ * hidden behind others, or a terminal that couldn't be started), the same command runs from any terminal (splashxmoon/friday-code#21).
  */
 export function TerminalSignIn({ name, command, onDone }: { name: string; command: string; /** Proven when pressed. */ onDone?: () => void }) {
   const [copied, setCopied] = useState(false);

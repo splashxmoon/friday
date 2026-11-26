@@ -8,7 +8,7 @@ import { projectText } from "./room-project-text.js";
 import "./room-project.css";
 
 /**
- * A room's Project (splashxmoon/friday#24): the repo its work is on, and the branch that work starts from. Chosen in the folder
+ * A room's Project (splashxmoon/friday-code#24): the repo its work is on, and the branch that work starts from. Chosen in the folder
  * picker refined for repos (Workspace.tsx RepoPicker): the crew's repos, this computer's, GitHub's, an address typed as it is, or a
  * folder whose remote names it. Any address is taken, since a new room, or another computer, may not have the repo yet. Or a folder
  * itself (Arun, 2026-11-17: "also add support for folders too"): the crew on this computer works in it as it is, with no branch.
