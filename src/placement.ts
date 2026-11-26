@@ -72,7 +72,7 @@ export interface Placement {
   not?: string;
 }
 
-const TOOL_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor", kilo: "Kilo", amp: "Amp", gemini: "Gemini CLI", copilot: "Copilot", opencode: "OpenCode", qwen: "Qwen Code" };
+const TOOL_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor", kilo: "Kilo", amp: "Amp", gemini: "Gemini CLI", copilot: "Copilot", opencode: "OpenCode", qwen: "Qwen Code", goose: "Goose" };
 export const toolName = (t: string) => TOOL_NAMES[t] ?? t;
 
 /** "acme/storefront" from a remote URL, or the folder's own name. */
