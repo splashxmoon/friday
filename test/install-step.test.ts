@@ -36,6 +36,20 @@ test("Qwen Code is offered by name with its npm install line on every system", (
   }
 });
 
+test("Auggie is offered by name with its npm install line on every system", () => {
+  assert.ok(ENGINE_TOOLS.includes("auggie"));
+  assert.equal(ENGINE_NAMES.auggie, "Auggie");
+  assert.equal(TOOL_INFO.auggie.docs, "https://docs.augmentcode.com/cli/overview");
+  assert.deepEqual(ENGINE_MODEL_INFO.auggie, []);
+  assert.deepEqual(ENGINE_MODELS.auggie, []);
+  for (const [os, shell] of [["windows", "PowerShell"], ["mac", "Terminal"], ["linux", "Shell"]] as const) {
+    const step = installStep("auggie", os);
+    assert.equal(step.shell, shell);
+    assert.equal(step.command, "npm install -g @augmentcode/auggie");
+    assert.match(step.needs!, /Node\.js/);
+  }
+});
+
 test("the system is read from the desktop app when it says, and from the browser otherwise", () => {
   assert.equal(osOf("win32", ""), "windows");
   assert.equal(osOf("darwin", ""), "mac");
@@ -44,3 +58,4 @@ test("the system is read from the desktop app when it says, and from the browser
   assert.equal(osOf(undefined, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"), "mac");
   assert.equal(osOf(undefined, "Mozilla/5.0 (X11; Linux x86_64)"), "linux");
 });
+
