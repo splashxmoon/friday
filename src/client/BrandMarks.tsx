@@ -208,6 +208,8 @@ export function EngineMark({ tool, size = 15, className }: { tool: EngineTool | 
   // Muse Code's own mark, the blue scribbled "M" (Arun, 2026-11-18: "use this for the muse code icon as well").
   if (tool === "muse") return <MuseMark size={size} className={className} />;
   if (tool === "antigravity") return <AntigravityMark size={size} className={className} />;
+  // Auggie has no mark in an open set: the generic bot icon, as for "Other ACP agent", until its own mark ships.
+  if (tool === "auggie") return <BotIcon size={size} className={className} aria-label={ENGINE_NAMES.auggie} style={{ flex: "none" }} />
   if (tool === "acp") return <BotIcon size={size} className={className} aria-label={ENGINE_NAMES.acp} style={{ flex: "none" }} />;
   if (tool && TOOL_PATHS[tool]) return <PathMark d={TOOL_PATHS[tool]!} label={ENGINE_NAMES[tool]} size={size} className={className} />;
   return <FridayMark size={size} className={className} />;
