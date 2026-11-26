@@ -5,6 +5,7 @@ import { AppUpdate } from "./AppUpdate.js";
 import { isLocal } from "./edition.js";
 import { ShortcutList } from "./Shortcuts.js";
 import { openOutside } from "./openOutside.js";
+import { REPO_URL } from "./whats-new.js";
 import {
   chooseNotifications,
   chooseReduceMotion,
@@ -1074,6 +1075,14 @@ export function AboutTab({ onReplayTour, part = "updates" }: { onReplayTour?: ()
             Send feedback <ExternalLinkIcon />
           </Button>
         </Row>
+        {/* The open-source edition's: a star is how others find it (2026-11-25: "I want more users and stars and contributors"). */}
+        {isLocal() && (
+          <Row label="Star Friday on GitHub" hint="Stars help other people find it.">
+            <Button variant="outline" size="sm" onClick={() => openOutside(REPO_URL)}>
+              <Icon name="star" size={13} /> Star on GitHub
+            </Button>
+          </Row>
+        )}
       </SettingsGroup>
     </section>
   );

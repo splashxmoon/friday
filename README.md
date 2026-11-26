@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Your coding agents, working together as one team.</strong><br/>
-  Claude Code, Codex, Cursor and 13 more talk to each other, split the work and check each other's work. Free, open source, on your own computer.
+  Claude Code, Codex, Cursor and 15 more talk to each other, split the work and check each other's work. Free, open source, on your own computer.
 </p>
 
 <p align="center">
@@ -23,6 +23,8 @@
   <a href="https://github.com/splashxmoon/friday/releases/latest/download/Friday-x86_64.AppImage"><b>Linux</b></a>
   <br/>or, with Node.js 22: <code>npx github:splashxmoon/friday</code>
 </p>
+
+<p align="center"><sub>If Friday saves you time, a ⭐ helps other people find it.</sub></p>
 
 <p align="center">
   <img src="docs/assets/site/hero.png" alt="Friday on a sample storefront project: the checkout-v2 thread with a team of three, Amp and Claude Code 2 working while Codex answers whether 3-D Secure is covered by a test, and the Agents panel showing who is done and who is working" width="960" />

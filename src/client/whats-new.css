@@ -109,3 +109,6 @@ html.desktop .wn.ob { max-height: min(536px, calc(100dvh - 76px)); }
 /* A release's own headline, "What's new in Friday" small over it (WhatsNew.tsx). */
 .wn-kicker { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 12px; font-weight: 500; letter-spacing: 0.01em; }
 .wn-body .wn-kicker + h2 { font-size: 22px; line-height: 1.2; letter-spacing: -.015em; }
+/* Star on GitHub, beside the notes, Got it alone on the right. */
+.wn-star { margin-left: 4px; margin-right: auto; }
+.wn-star svg { color: #c9951a; }

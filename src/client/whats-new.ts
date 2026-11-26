@@ -28,6 +28,9 @@ export const WHATS_NEW: WhatsNewNotes = {
   ],
 };
 
+/** The open-source repository, to star (2026-11-25: "I want more users and stars and contributors"). */
+export const REPO_URL = "https://github.com/splashxmoon/friday";
+
 /** The release's own page, for everything else it changed. */
 export const notesUrl = (version: string) => `https://github.com/splashxmoon/friday/releases/tag/v${version}`;
 

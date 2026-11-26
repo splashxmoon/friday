@@ -5,7 +5,7 @@ import { Icon } from "./icons.js";
 import { openOutside } from "./openOutside.js";
 import { BlobFace } from "./teammate-face.js";
 import { useTeamNow } from "./Teammates.js";
-import { WHATS_NEW, notesUrl, whatsNewDue } from "./whats-new.js";
+import { REPO_URL, WHATS_NEW, notesUrl, whatsNewDue } from "./whats-new.js";
 import "./whats-new.css";
 
 /**
@@ -186,6 +186,10 @@ function Sheet({ onClose }: { onClose: () => void }) {
           <button type="button" className="wn-notes" onClick={() => openOutside(notesUrl(version))}>
             Read the full notes
             <Icon name="arrowUpRight" size={13} />
+          </button>
+          <button type="button" className="wn-notes wn-star" onClick={() => openOutside(REPO_URL)}>
+            <Icon name="star" size={13} />
+            Star on GitHub
           </button>
           <button ref={got} type="button" className="btn small primary wn-got" onClick={onClose}>
             Got it

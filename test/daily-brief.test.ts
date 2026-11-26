@@ -194,6 +194,11 @@ test("a turn quiet for half an hour mid-run is stalled; a limit that reset and c
 test("the Crew: teammates' work and proof, a room gone quiet, check-ins later today, and no double-up with the Away brief", async (t) => {
   const { session, turn, add, read } = await storeFor(t);
   const since = Date.now() - MIN;
+  // Nova's check-in a few minutes from now, in UTC: "later today" whatever the hour. At 23:59 UTC it was tomorrow's on this
+  // computer's day for the evening hours when UTC has already turned the date (the test failed every evening, US time).
+  const soonAt = Date.now() + 5 * MIN;
+  const soon = wallClock(soonAt, "UTC").hhmm;
+  const stillToday = new Date(soonAt).toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10) && new Date(soonAt).toDateString() === new Date().toDateString();
   await session("s-team", "Crew", { team: true });
   // A room is a team session in the open-source edition: told as a room by its place, not by that.
   await session("s-room", "Acme launch", { team: true });
@@ -210,7 +215,7 @@ test("the Crew: teammates' work and proof, a room gone quiet, check-ins later to
       { sid: "s-room", room: "Acme launch", events: places[1]!.events, lanes: { nova: "l-nova" } },
     ],
     mates: [
-      { id: "nova", name: "Nova", lane: "l-nova", look: "nova-1", checkins: [{ id: "c1", text: "What's left for launch?", every: "daily", at: "23:59", days: [], tz: "UTC" }] },
+      { id: "nova", name: "Nova", lane: "l-nova", look: "nova-1", checkins: [{ id: "c1", text: "What's left for launch?", every: "daily", at: soon, days: [], tz: "UTC" }] },
       { id: "kit", name: "Kit", lane: "l-kit" },
     ],
   });
@@ -223,7 +228,7 @@ test("the Crew: teammates' work and proof, a room gone quiet, check-ins later to
   assert.equal(b.plan.find((p) => p.source === "left")?.where?.kind, "room");
   assert.deepEqual(nova.mate, { name: "Nova", look: "nova-1" });
   assert.match(b.risk.find((r) => r.who === "Kit")?.text ?? "", /didn't finish “Fix the Safari bug”/);
-  if (wallClock(Date.now(), "UTC").hhmm < "23:59") assert.ok(b.plan.some((p) => p.source === "checkin" && p.who === "Nova" && p.at === "23:59"), "Nova's check-in later today");
+  if (stillToday) assert.ok(b.plan.some((p) => p.source === "checkin" && p.who === "Nova" && p.at === soon), "Nova's check-in later today");
   // Four hours on, nothing has moved in the room and a task is still open: it went quiet.
   const quiet = collectBrief(base({ since, until: Date.now() + 5 * H, sessions, crew: crew(sessions) }))!;
   assert.match(quiet.risk.find((r) => r.kind === "quiet")?.text ?? "", /Acme launch went quiet 5h ago with 2 tasks not done/);

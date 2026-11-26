@@ -11,3 +11,14 @@
 .done-toast-what { overflow: hidden; font-size: 12px; line-height: 16px; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
 @keyframes done-toast-in { from { opacity: 0; transform: translateY(4px); } }
 @media (prefers-reduced-motion: reduce) { .done-toast { animation: none; } }
+
+/* The star, asked once (DoneToasts.tsx): a toast of the same width, not a link to press as a whole; Star and × on its right. */
+.done-toast.star-ask { cursor: default; padding-right: 8px; }
+.done-toast.star-ask:hover { background: var(--surface, var(--raised)); }
+.star-ask-mark { display: grid; place-items: center; width: 26px; height: 26px; flex-shrink: 0; border-radius: 8px; background: color-mix(in srgb, #e3b341 18%, transparent); color: #c9951a; }
+.star-ask .done-toast-text { flex: 1; }
+.star-ask-go { flex-shrink: 0; height: 26px; padding: 0 11px; font-size: 12.5px; }
+.star-ask-x { display: grid; place-items: center; width: 22px; height: 22px; flex-shrink: 0; border-radius: 6px; color: var(--text-muted); }
+.star-ask-x:hover { background: var(--hover); color: var(--ink); }
+.star-ask-x:focus-visible, .star-ask-go:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.star-ask .done-toast-what { white-space: normal; }

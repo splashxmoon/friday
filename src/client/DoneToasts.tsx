@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { doneChime } from "./chime.js";
 import { doneChimeOn } from "./prefs.js";
+import { isLocal } from "./edition.js";
+import { Icon } from "./icons.js";
+import { openOutside } from "./openOutside.js";
+import { REPO_URL } from "./whats-new.js";
 import "./done-toasts.css";
 
 /**
@@ -13,6 +17,44 @@ export type Done = { sid: string; title: string; what: string; /** Said as it is
 /** Said by the attention poll as a run ends (Attention.tsx). */
 export const sayDone = (d: Done) => void window.dispatchEvent(new CustomEvent<Done>("friday:done", { detail: d }));
 
+/**
+ * A star, asked for once (2026-11-25: "I want more users and stars and contributors"; thousands download each release, few star):
+ * in the open-source app, under its Finished toasts, a moment after the first run that finishes while Friday is in sight, or on
+ * the third day it is opened (a Code chat's finish is said in its own column, not here, so most never see a Finished toast). It
+ * stays until Star or ×, and is never asked again. Settings › Help and What's new have the link for later.
+ */
+const STAR_ASKED = "friday.star.asked";
+const starAsked = () => {
+  try {
+    return !!localStorage.getItem(STAR_ASKED);
+  } catch {
+    return true;
+  }
+};
+const markStarAsked = () => {
+  try {
+    localStorage.setItem(STAR_ASKED, String(Date.now()));
+  } catch {}
+};
+/** How long after the run finishes: its toast first. */
+const STAR_AFTER_MS = 2500;
+/** The days Friday was opened on, up to the third: then it asks. */
+const STAR_DAYS = "friday.star.days";
+const STAR_ON_DAY = 3;
+/** How long after the window opens on that day: once it has settled. */
+const STAR_OPEN_MS = 8000;
+/** Today noted as a day Friday was opened; true once it has been opened on STAR_ON_DAY days. */
+function openedOnEnoughDays(today = new Date().toDateString()): boolean {
+  try {
+    const days = (JSON.parse(localStorage.getItem(STAR_DAYS) ?? "[]") as unknown[]).filter((d): d is string => typeof d === "string");
+    if (!days.includes(today)) days.push(today);
+    localStorage.setItem(STAR_DAYS, JSON.stringify(days.slice(-STAR_ON_DAY)));
+    return days.length >= STAR_ON_DAY;
+  } catch {
+    return false;
+  }
+}
+
 /** How long a toast stays, unless the pointer is on it. */
 const SHOWN_MS = 7000;
 /** The most shown at once: the newest. */
@@ -20,6 +62,7 @@ const MAX = 3;
 
 export function DoneToasts({ activeSid }: { activeSid: string | null }) {
   const [shown, setShown] = useState<(Done & { id: number })[]>([]);
+  const [star, setStar] = useState(false);
   const active = useRef(activeSid);
   active.current = activeSid;
   const held = useRef(false);
@@ -38,6 +81,11 @@ export function DoneToasts({ activeSid }: { activeSid: string | null }) {
     const on = (e: Event) => {
       const d = (e as CustomEvent<Done>).detail;
       const looking = document.visibilityState === "visible" && document.hasFocus();
+      if (looking && isLocal() && !starAsked()) {
+        markStarAsked();
+        const t = setTimeout(() => (timers.delete(t), setStar(true)), STAR_AFTER_MS);
+        timers.add(t);
+      }
       // The session you're looking at: its chat says so already.
       if (looking && d.sid === active.current) return;
       if (doneChimeOn()) doneChime();
@@ -65,12 +113,22 @@ export function DoneToasts({ activeSid }: { activeSid: string | null }) {
       for (const t of timers) clearTimeout(t);
     };
   }, []);
+  // The third day it is opened: asked a while after the window settles, if still not asked and Friday is in sight.
+  useEffect(() => {
+    if (!isLocal() || starAsked() || !openedOnEnoughDays()) return;
+    const t = setTimeout(() => {
+      if (starAsked() || document.visibilityState !== "visible") return;
+      markStarAsked();
+      setStar(true);
+    }, STAR_OPEN_MS);
+    return () => clearTimeout(t);
+  }, []);
   // Opened from elsewhere (the sidebar): its toast has said what it had to.
   useEffect(() => setShown((s) => s.filter((x) => x.sid !== activeSid)), [activeSid]);
   // None left (the last one clicked, which took the list away under the pointer, so it never heard the pointer leave): nothing is
   // being read, or every toast after it stayed until hovered and left (2026-11-02 review).
   if (!shown.length) held.current = false;
-  if (!shown.length) return null;
+  if (!shown.length && !star) return null;
   return (
     <section className="done-toasts" aria-label="Finished" aria-live="polite" onPointerEnter={() => (held.current = true)} onPointerLeave={() => (held.current = false)}>
       {shown.map((d) => (
@@ -83,6 +141,23 @@ export function DoneToasts({ activeSid }: { activeSid: string | null }) {
           </span>
         </button>
       ))}
+      {star && (
+        <div className="done-toast star-ask" role="group" aria-label="Star Friday on GitHub">
+          <span className="star-ask-mark" aria-hidden="true">
+            <Icon name="star" size={14} />
+          </span>
+          <span className="done-toast-text">
+            <span className="done-toast-title">Like Friday?</span>
+            <span className="done-toast-what">A star helps others find it.</span>
+          </span>
+          <button type="button" className="btn small star-ask-go" onClick={() => (openOutside(REPO_URL), setStar(false))}>
+            Star
+          </button>
+          <button type="button" className="star-ask-x" aria-label="Not now" title="Not now" onClick={() => setStar(false)}>
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      )}
     </section>
   );
 }
