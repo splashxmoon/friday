@@ -1,6 +1,6 @@
 # Contributing to Friday
 
-Thanks for helping. Bug fixes, support for another coding tool, better docs and new features are all welcome.
+Thanks for helping. Bug fixes, support for another coding tool, better docs and new features are all welcome. Every issue and pull request gets a reply within a day, and every release note thanks the people whose work is in it. Not sure where to start, or want to talk an idea through first? Ask in [Discussions](https://github.com/splashxmoon/friday-code/discussions) or on [issue #42](https://github.com/splashxmoon/friday-code/issues/42).
 
 ## Getting set up
 
@@ -8,7 +8,7 @@ You need Node.js 22 or newer and Git. No database or other service: the tests ru
 
 ```bash
 git clone https://github.com/splashxmoon/friday-code
-cd friday
+cd friday-code
 npm install
 npm start            # Friday in your browser, from this folder
 npm run desktop      # or as the desktop app

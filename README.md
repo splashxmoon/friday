@@ -24,7 +24,7 @@
   <br/>or, with Node.js 22: <code>npx github:splashxmoon/friday-code</code>
 </p>
 
-<p align="center"><sub>If Friday saves you time, a ⭐ helps other people find it.</sub></p>
+<p align="center"><sub>If Friday saves you time, a ⭐ helps other people find it. Want to help build it? <a href="#contributing">Start here</a>.</sub></p>
 
 <p align="center">
   <img src="docs/assets/site/hero.png" alt="Friday on a sample storefront project: the checkout-v2 thread with a team of three, Amp and Claude Code 2 working while Codex answers whether 3-D Secure is covered by a test, and the Agents panel showing who is done and who is working" width="960" />
@@ -207,7 +207,7 @@ Friday opens in your browser at `http://127.0.0.1:4321`. To keep a copy:
 
 ```bash
 git clone https://github.com/splashxmoon/friday-code
-cd friday
+cd friday-code
 npm install
 npm start
 ```
@@ -277,7 +277,18 @@ Not through Friday. It runs on `127.0.0.1` with no account; your coding tools ta
 
 ## Contributing
 
-Issues and pull requests are welcome: [good first issues](https://github.com/splashxmoon/friday-code/labels/good%20first%20issue) · [CONTRIBUTING.md](CONTRIBUTING.md). To build it: `npm install`, `npm test`, `npm run desktop`.
+Friday is built in the open and every pull request gets a reply within a day. Good places to start:
+
+- **Add a coding tool.** Most tools are a short adapter: [goose](https://github.com/splashxmoon/friday-code/issues/36), [Auggie](https://github.com/splashxmoon/friday-code/issues/37), [Aider](https://github.com/splashxmoon/friday-code/issues/38) and [Crush](https://github.com/splashxmoon/friday-code/issues/39) are waiting, and [the guide](docs/adding-a-coding-tool.md) walks through one.
+- **Package it.** [Scoop](https://github.com/splashxmoon/friday-code/issues/41) for Windows, [the AUR](https://github.com/splashxmoon/friday-code/issues/40) for Arch.
+- **Try it and report.** [The Linux AppImage on your distro](https://github.com/splashxmoon/friday-code/issues/4), [MCP sign-in on Windows and Linux](https://github.com/splashxmoon/friday-code/issues/26).
+- **Something else?** [Start here](https://github.com/splashxmoon/friday-code/issues/42), the [good first issues](https://github.com/splashxmoon/friday-code/labels/good%20first%20issue), or an idea in [Discussions](https://github.com/splashxmoon/friday-code/discussions).
+
+To build it: `npm install`, `npm start` (or `npm run desktop`), `npm test`. [CONTRIBUTING.md](CONTRIBUTING.md) has the rest. Every release note thanks the people whose work is in it.
+
+Thanks to everyone who has helped build Friday:
+
+<a href="https://github.com/splashxmoon/friday-code/graphs/contributors"><img src="https://contrib.rocks/image?repo=splashxmoon/friday-code" alt="Friday's contributors" /></a>
 
 If Friday saves you time, a ⭐ helps other developers find it.
 
