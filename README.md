@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>One app for all your coding agents.</strong><br/>
-  Claude Code, Codex, Cursor and 15 more, on the subscriptions you already pay for. Run them side by side, or hand them a job: they split it, review each other's work, and pick up when one runs out. Free and open source, on your own computer.
+  Claude Code, Codex, Cursor and 16 more, on the subscriptions you already pay for. Run them side by side, or hand them a job: they split it, review each other's work, and pick up when one runs out. Free and open source, on your own computer.
 </p>
 
 <p align="center">
@@ -169,6 +169,7 @@ Keep AI teammates on your computer, each with a name, a role, a memory and its o
 | **Muse Code** | **Windows** `irm https://dev.meta.ai/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://dev.meta.ai/install.sh \| sh` | `muse login` |
 | **Qwen Code** | `npm install -g @qwen-code/qwen-code` | run `qwen` once and sign in |
 | **Pi** | `npm install -g @mariozechner/pi-coding-agent` | run `pi` once and type `/login` (or set a provider's API key) |
+| **Auggie** | `npm install -g @augmentcode/auggie` | `auggie auth login` |
 | **Other ACP agent** | any ACP agent | any ACP agent |
 
 ### The desktop app
@@ -260,7 +261,7 @@ No. Friday runs on your computer at `127.0.0.1`, with no account, and the work r
 Friday only uses the tools it finds. Its setup screen shows which are installed and signed in, and can sign the rest in for you.
 
 **Which coding agents does it support?**
-Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, Antigravity CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, Muse Code, and any agent that speaks the Agent Client Protocol (ACP).
+Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, Antigravity CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, Muse Code, Auggie, and any agent that speaks the Agent Client Protocol (ACP).
 
 **Does it cost anything, or use my API keys?**
 Friday is free and MIT licensed. The work runs on each tool's own plan and sign-in, so there are no keys to paste and nothing extra to pay. If you'd like Friday Code, Friday's own agent, too, give it a key of yours or a model on your computer in Settings › Your models: then it runs on that.
@@ -279,7 +280,7 @@ Not through Friday. It runs on `127.0.0.1` with no account; your coding tools ta
 
 Friday is built in the open and every pull request gets a reply within a day. Good places to start:
 
-- **Add a coding tool.** Most tools are a short adapter: [goose](https://github.com/splashxmoon/friday-code/issues/36), [Auggie](https://github.com/splashxmoon/friday-code/issues/37), [Aider](https://github.com/splashxmoon/friday-code/issues/38) and [Crush](https://github.com/splashxmoon/friday-code/issues/39) are waiting, and [the guide](docs/adding-a-coding-tool.md) walks through one.
+- **Add a coding tool.** Most tools are a short adapter: [goose](https://github.com/splashxmoon/friday-code/issues/36), [Aider](https://github.com/splashxmoon/friday-code/issues/38) and [Crush](https://github.com/splashxmoon/friday-code/issues/39) are waiting, and [the guide](docs/adding-a-coding-tool.md) walks through one.
 - **Package it.** [Scoop](https://github.com/splashxmoon/friday-code/issues/41) for Windows, [the AUR](https://github.com/splashxmoon/friday-code/issues/40) for Arch.
 - **Try it and report.** [The Linux AppImage on your distro](https://github.com/splashxmoon/friday-code/issues/4), [MCP sign-in on Windows and Linux](https://github.com/splashxmoon/friday-code/issues/26).
 - **Something else?** [Start here](https://github.com/splashxmoon/friday-code/issues/42), the [good first issues](https://github.com/splashxmoon/friday-code/labels/good%20first%20issue), or an idea in [Discussions](https://github.com/splashxmoon/friday-code/discussions).
