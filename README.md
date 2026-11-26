@@ -102,6 +102,7 @@ No API keys and no new plan: Friday drives the coding tools signed in on your co
     <td align="center" width="120"><img src="docs/assets/tools/amp.svg" width="32" height="32" alt="" /><br /><sub>Amp</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/muse.svg" width="32" height="32" alt="" /><br /><sub>Muse Code</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/qwen.svg" width="32" height="32" alt="" /><br /><sub>Qwen Code</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/goose.svg" width="32" height="32" alt="" /><br /><sub>Goose</sub>sub></td>td>
     <td align="center" width="120"><img src="docs/assets/tools/pi.svg" width="32" height="32" alt="" /><br /><sub>Pi</sub></td>
   </tr>
   <tr>
@@ -168,6 +169,7 @@ Keep AI teammates on your computer, each with a name, a role, a memory and its o
 | **Amp** | `npm install -g @ampcode/cli` | `amp login` |
 | **Muse Code** | **Windows** `irm https://dev.meta.ai/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://dev.meta.ai/install.sh \| sh` | `muse login` |
 | **Qwen Code** | `npm install -g @qwen-code/qwen-code` | run `qwen` once and sign in |
+| **Goose** | **Windows** `irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| bash` | run `goose configure` and pick a provider |
 | **Pi** | `npm install -g @mariozechner/pi-coding-agent` | run `pi` once and type `/login` (or set a provider's API key) |
 | **Other ACP agent** | any ACP agent | any ACP agent |
 
