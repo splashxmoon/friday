@@ -18,7 +18,7 @@ export type Done = { sid: string; title: string; what: string; /** Said as it is
 export const sayDone = (d: Done) => void window.dispatchEvent(new CustomEvent<Done>("friday:done", { detail: d }));
 
 /**
- * A star, asked for once (2026-11-25: "I want more users and stars and contributors"; thousands download each release, few star):
+ * A star, asked for once (2026-11-25: "I want more users and stars and contributors"; about a thousand installs, under a hundred stars):
  * in the open-source app, under its Finished toasts, a moment after the first run that finishes while Friday is in sight, or on
  * the third day it is opened (a Code chat's finish is said in its own column, not here, so most never see a Finished toast). It
  * stays until Star or ×, and is never asked again. Settings › Help and What's new have the link for later.
