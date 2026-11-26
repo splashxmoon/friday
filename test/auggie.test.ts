@@ -35,13 +35,13 @@ describe("auggie via ACP", () => {
   it("reads the answer back", () => {
     const a = agent();
     assert.equal(a.sent[0].method, "initialize");
-    const [id] = a.say({ id: 1, result: { protocolVersion: 1 } });
-    assert.equal(id.kind, "resume");
-    const [s] = a.say({ id: 2, result: { sessionId: "s1" } });
-    assert.equal(s.kind, "resume");
-    const [prompt] = a.say({ id: 3, result: { stopReason: "end_turn" } });
-    assert.equal(prompt.kind, "resume");
+    assert.deepEqual(a.say({ id: 0, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } }), []);
+    assert.equal(a.last().method, "session/new");
+    assert.deepEqual(a.last().params, { cwd: "/work/repo", mcpServers: [] });
+    assert.deepEqual(a.say({ id: a.last().id, result: { sessionId: "s1" } }), [{ kind: "session", id: "s1" }]);
+    assert.equal(a.last().method, "session/prompt");
+    assert.equal(a.last().params.sessionId, "s1");
     const [chunk] = a.update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done." } });
-    assert.deepEqual(chunk, { kind: "delta", text: "Done." });
+    assert.deepEqual(chunk, { kind: "delta", text: "Done.", channel: "text" });
   });
 });
