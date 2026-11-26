@@ -2225,6 +2225,16 @@ export const kilo: Adapter = acp({
   nudge: () => process.platform === "win32",
 });
 
+// Auggie (Augment CLI) over ACP: `auggie --acp`, signed in with `auggie auth login`.
+export const auggie: Adapter = acp({
+    tool: "auggie",
+    bins: ["auggie"],
+    login: ["auth", "login"],
+    logout: ["auth", "logout"],
+    status: { args: ["auth", "status"] },
+    args: () => ["--acp"],
+});
+
 export const devin: Adapter = acp({
   tool: "devin",
   bins: ["devin"],
@@ -3240,7 +3250,7 @@ export const pi: Adapter = {
   },
 };
 
-export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, pi, acp: custom };
+export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, pi, auggie, acp: custom };
 
 // ── finding the executables ──────────────────────────────────────────
 
