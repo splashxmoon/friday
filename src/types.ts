@@ -208,7 +208,7 @@ export type SessionOptionsPatch = Partial<Omit<SessionOptions, "policy">> & { po
  * holds a key for these: the CLI runs on the host's machine, under their login,
  * and a small runner relays the session to it.
  */
-export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "pi" | "aider" | "acp";
+export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "pi" | "aider" | "crush" | "acp";
 
 /** What a person sees about a coding tool before and after it is on their machine. Its runner side is in runner/adapters.ts. */
 export interface ToolInfo {
@@ -336,6 +336,15 @@ export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
     install: { windows: 'powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 | iex"', unix: "curl -LsSf https://aider.chat/install.sh | sh" },
     tint: "#14b014",
     note: "Runs in Auto or Plan: it doesn't ask before each change. Set a provider's API key (Anthropic, OpenAI and others) where it runs.",
+  },
+  // Charm's coding agent, in plain text: one `crush run` a turn (runner/adapters.ts crush).
+  crush: {
+    name: "Crush",
+    blurb: "Charm's coding agent",
+    docs: "https://github.com/charmbracelet/crush",
+    install: { npm: "@charmland/crush" },
+    tint: "#6b50ff",
+    note: "Runs only in Auto: a run approves its own tool calls.",
   },
   // Any other agent in the ACP registry (goose, Mistral Vibe, Auggie, Kimi...), by the command somebody sets on their computer.
   acp: {
@@ -553,8 +562,9 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
   qwen: [],
   // Pi lists the models of every provider it is signed in to, read from its first turn.
   pi: [],
-  // Aider takes any model its provider has, typed by name: no fixed list.
+  // Aider and Crush take any model their provider has, typed by name: no fixed list.
   aider: [],
+  crush: [],
   acp: [],
 };
 

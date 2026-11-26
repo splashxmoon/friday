@@ -106,6 +106,7 @@ No API keys and no new plan: Friday drives the coding tools signed in on your co
   </tr>
   <tr>
     <td align="center" width="120"><img src="docs/assets/tools/aider.svg" width="32" height="32" alt="" /><br /><sub>Aider</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/crush.svg" width="32" height="32" alt="" /><br /><sub>Crush</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/acp.svg" width="32" height="32" alt="" /><br /><sub>Any ACP agent</sub></td>
   </tr>
 </table>
@@ -171,6 +172,7 @@ Keep AI teammates on your computer, each with a name, a role, a memory and its o
 | **Qwen Code** | `npm install -g @qwen-code/qwen-code` | run `qwen` once and sign in |
 | **Pi** | `npm install -g @mariozechner/pi-coding-agent` | run `pi` once and type `/login` (or set a provider's API key) |
 | **Aider** | **Windows** `powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 \| iex"` <br> **Mac/Linux** `curl -LsSf https://aider.chat/install.sh \| sh` | set a provider's API key (e.g. `ANTHROPIC_API_KEY`) |
+| **Crush** | `npm install -g @charmland/crush` | `crush login` (or a provider's API key) |
 | **Other ACP agent** | any ACP agent | any ACP agent |
 
 ### The desktop app
