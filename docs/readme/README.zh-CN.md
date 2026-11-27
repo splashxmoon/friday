@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>一个应用，管好你所有的编程智能体。</strong><br/>
-  Claude Code、Codex、Cursor 以及另外 15 款工具，直接用你已经付费的订阅。让它们并排运行，或者交给它们一项任务：它们会拆分工作、互相审查，一个用完额度时另一个接手。免费开源，运行在你自己的电脑上。
+  Claude Code、Codex、Cursor 以及另外 19 款工具，直接用你已经付费的订阅。让它们并排运行，或者交给它们一项任务：它们会拆分工作、互相审查，一个用完额度时另一个接手。免费开源，运行在你自己的电脑上。
 </p>
 
 <p align="center"><sub><a href="../../README.md">English</a> · <b>简体中文</b> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.vi.md">Tiếng Việt</a> · <a href="README.es.md">Español</a> · <a href="README.pt-BR.md">Português</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a></sub></p>
@@ -109,6 +109,10 @@
     <td align="center" width="120"><img src="../../docs/assets/tools/pi.svg" width="32" height="32" alt="" /><br /><sub>Pi</sub></td>
   </tr>
   <tr>
+    <td align="center" width="120"><img src="../../docs/assets/tools/goose.svg" width="32" height="32" alt="" /><br /><sub>Goose</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/auggie.svg" width="32" height="32" alt="" /><br /><sub>Auggie</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/aider.svg" width="32" height="32" alt="" /><br /><sub>Aider</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/crush.svg" width="32" height="32" alt="" /><br /><sub>Crush</sub></td>
     <td align="center" width="120"><img src="../../docs/assets/tools/acp.svg" width="32" height="32" alt="" /><br /><sub>任意 ACP 智能体</sub></td>
   </tr>
 </table>
@@ -173,6 +177,10 @@ Friday 采用 MIT 许可证，没有账号，也没有自己的模型，只监�
 | **Muse Code** | **Windows** `irm https://dev.meta.ai/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://dev.meta.ai/install.sh \| sh` | `muse login` |
 | **Qwen Code** | `npm install -g @qwen-code/qwen-code` | 运行一次 `qwen` 并登录 |
 | **Pi** | `npm install -g @mariozechner/pi-coding-agent` | 运行一次 `pi` 并输入 `/login`（或设置某个提供商的 API 密钥） |
+| **Goose** | **Windows** `irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| bash` | 运行 `goose configure` 并选择一个提供商 |
+| **Auggie** | `npm install -g @augmentcode/auggie` | `auggie auth login` |
+| **Aider** | **Windows** `powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 \| iex"` <br> **Mac/Linux** `curl -LsSf https://aider.chat/install.sh \| sh` | 设置某个提供商的 API 密钥（例如 `ANTHROPIC_API_KEY`） |
+| **Crush** | `npm install -g @charmland/crush` | `crush login`（或某个提供商的 API 密钥） |
 | **其他 ACP 智能体** | 任意 ACP 智能体 | 任意 ACP 智能体 |
 
 ### 桌面应用
@@ -284,7 +292,7 @@ Friday 免费，采用 MIT 许可证。工作使用每个工具自己的套餐�
 
 Friday 公开开发，每个 pull request 都会在一天内得到回复。适合入手的地方：
 
-- **添加一个编程工具。** 大多数工具只需要一个简短的适配器：[goose](https://github.com/splashxmoon/friday-code/issues/36)、[Auggie](https://github.com/splashxmoon/friday-code/issues/37)、[Aider](https://github.com/splashxmoon/friday-code/issues/38) 和 [Crush](https://github.com/splashxmoon/friday-code/issues/39) 正等着有人来做，[这份指南](../../docs/adding-a-coding-tool.md)会带你完整做一遍。
+- **添加一个编程工具。** 大多数工具只需要一个简短的适配器，[这份指南](../../docs/adding-a-coding-tool.md)会带你完整做一遍。
 - **打包。** Windows 的 [Scoop](https://github.com/splashxmoon/friday-code/issues/41)，Arch 的 [AUR](https://github.com/splashxmoon/friday-code/issues/40)。
 - **试用并反馈。** [在你的发行版上运行 Linux AppImage](https://github.com/splashxmoon/friday-code/issues/4)，[Windows 和 Linux 上的 MCP 登录](https://github.com/splashxmoon/friday-code/issues/26)。
 - **想做别的？** [从这里开始](https://github.com/splashxmoon/friday-code/issues/42)，看看 [good first issues](https://github.com/splashxmoon/friday-code/labels/good%20first%20issue)，或者在 [Discussions](https://github.com/splashxmoon/friday-code/discussions) 里提出想法。

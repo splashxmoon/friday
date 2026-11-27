@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Một ứng dụng cho mọi agent lập trình của bạn.</strong><br/>
-  Claude Code, Codex, Cursor và 15 công cụ khác, chạy trên các gói đăng ký bạn đang trả tiền. Chạy chúng song song, hoặc giao cho chúng một việc: chúng tự chia việc, review công việc của nhau, và tiếp quản khi một agent hết lượt dùng. Miễn phí, mã nguồn mở, chạy trên máy tính của bạn.
+  Claude Code, Codex, Cursor và 19 công cụ khác, chạy trên các gói đăng ký bạn đang trả tiền. Chạy chúng song song, hoặc giao cho chúng một việc: chúng tự chia việc, review công việc của nhau, và tiếp quản khi một agent hết lượt dùng. Miễn phí, mã nguồn mở, chạy trên máy tính của bạn.
 </p>
 
 <p align="center"><sub><a href="../../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <b>Tiếng Việt</b> · <a href="README.es.md">Español</a> · <a href="README.pt-BR.md">Português</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a></sub></p>
@@ -109,6 +109,10 @@ Không cần API key, không cần gói mới: Friday điều khiển các công
     <td align="center" width="120"><img src="../../docs/assets/tools/pi.svg" width="32" height="32" alt="" /><br /><sub>Pi</sub></td>
   </tr>
   <tr>
+    <td align="center" width="120"><img src="../../docs/assets/tools/goose.svg" width="32" height="32" alt="" /><br /><sub>Goose</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/auggie.svg" width="32" height="32" alt="" /><br /><sub>Auggie</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/aider.svg" width="32" height="32" alt="" /><br /><sub>Aider</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/crush.svg" width="32" height="32" alt="" /><br /><sub>Crush</sub></td>
     <td align="center" width="120"><img src="../../docs/assets/tools/acp.svg" width="32" height="32" alt="" /><br /><sub>Bất kỳ agent ACP nào</sub></td>
   </tr>
 </table>
@@ -173,6 +177,10 @@ Giữ các đồng đội AI trên máy bạn, mỗi người có tên, vai trò
 | **Muse Code** | **Windows** `irm https://dev.meta.ai/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://dev.meta.ai/install.sh \| sh` | `muse login` |
 | **Qwen Code** | `npm install -g @qwen-code/qwen-code` | chạy `qwen` một lần và đăng nhập |
 | **Pi** | `npm install -g @mariozechner/pi-coding-agent` | chạy `pi` một lần và gõ `/login` (hoặc đặt API key của một nhà cung cấp) |
+| **Goose** | **Windows** `irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| bash` | chạy `goose configure` và chọn một nhà cung cấp |
+| **Auggie** | `npm install -g @augmentcode/auggie` | `auggie auth login` |
+| **Aider** | **Windows** `powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 \| iex"` <br> **Mac/Linux** `curl -LsSf https://aider.chat/install.sh \| sh` | đặt API key của một nhà cung cấp (ví dụ `ANTHROPIC_API_KEY`) |
+| **Crush** | `npm install -g @charmland/crush` | `crush login` (hoặc API key của một nhà cung cấp) |
 | **Agent ACP khác** | bất kỳ agent ACP nào | bất kỳ agent ACP nào |
 
 ### Ứng dụng desktop
@@ -264,7 +272,7 @@ Không. Friday chạy trên máy bạn tại `127.0.0.1`, không cần tài kho�
 Friday chỉ dùng những công cụ nó tìm thấy. Màn hình thiết lập cho biết công cụ nào đã cài và đã đăng nhập, và có thể đăng nhập giúp bạn những công cụ còn lại.
 
 **Nó hỗ trợ những agent lập trình nào?**
-Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, Antigravity CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, Muse Code, và bất kỳ agent nào dùng Agent Client Protocol (ACP).
+Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, Antigravity CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, Muse Code, Qwen Code, Pi, Goose, Auggie, Aider, Crush, và bất kỳ agent nào dùng Agent Client Protocol (ACP).
 
 **Nó có tốn tiền, hay dùng API key của tôi không?**
 Friday miễn phí và dùng giấy phép MIT. Công việc chạy trên gói và thông tin đăng nhập của chính từng công cụ, nên không có key nào phải dán vào và không phải trả thêm gì. Nếu bạn cũng muốn dùng Friday Code, agent riêng của Friday, hãy đưa cho nó một key của bạn hoặc một model trên máy bạn trong Settings › Your models: khi đó nó chạy trên cái đó.
@@ -284,7 +292,7 @@ Không qua Friday. Nó chạy trên `127.0.0.1` không cần tài khoản; các 
 
 Friday được xây dựng công khai và mọi pull request đều được trả lời trong vòng một ngày. Những chỗ tốt để bắt đầu:
 
-- **Thêm một công cụ lập trình.** Hầu hết công cụ chỉ cần một adapter ngắn: [goose](https://github.com/splashxmoon/friday-code/issues/36), [Auggie](https://github.com/splashxmoon/friday-code/issues/37), [Aider](https://github.com/splashxmoon/friday-code/issues/38) và [Crush](https://github.com/splashxmoon/friday-code/issues/39) đang chờ, và [hướng dẫn](../../docs/adding-a-coding-tool.md) đi qua từng bước cho một công cụ.
+- **Thêm một công cụ lập trình.** Hầu hết công cụ chỉ cần một adapter ngắn, và [hướng dẫn](../../docs/adding-a-coding-tool.md) đi qua từng bước cho một công cụ.
 - **Đóng gói nó.** [Scoop](https://github.com/splashxmoon/friday-code/issues/41) cho Windows, [AUR](https://github.com/splashxmoon/friday-code/issues/40) cho Arch.
 - **Dùng thử và báo lại.** [Linux AppImage trên distro của bạn](https://github.com/splashxmoon/friday-code/issues/4), [đăng nhập MCP trên Windows và Linux](https://github.com/splashxmoon/friday-code/issues/26).
 - **Việc khác?** [Bắt đầu tại đây](https://github.com/splashxmoon/friday-code/issues/42), các [good first issue](https://github.com/splashxmoon/friday-code/labels/good%20first%20issue), hoặc một ý tưởng trong [Discussions](https://github.com/splashxmoon/friday-code/discussions).

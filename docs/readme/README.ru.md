@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Одно приложение для всех ваших агентов для кода.</strong><br/>
-  Claude Code, Codex, Cursor и ещё 15 инструментов, на подписках, за которые вы уже платите. Запускайте их рядом или дайте им задачу: они делят её между собой, проверяют работу друг друга и подхватывают, когда у одного заканчиваются лимиты. Бесплатно, с открытым кодом, на вашем компьютере.
+  Claude Code, Codex, Cursor и ещё 19 инструментов, на подписках, за которые вы уже платите. Запускайте их рядом или дайте им задачу: они делят её между собой, проверяют работу друг друга и подхватывают, когда у одного заканчиваются лимиты. Бесплатно, с открытым кодом, на вашем компьютере.
 </p>
 
 <p align="center"><sub><a href="../../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.vi.md">Tiếng Việt</a> · <a href="README.es.md">Español</a> · <a href="README.pt-BR.md">Português</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <b>Русский</b></sub></p>
@@ -109,6 +109,10 @@
     <td align="center" width="120"><img src="../../docs/assets/tools/pi.svg" width="32" height="32" alt="" /><br /><sub>Pi</sub></td>
   </tr>
   <tr>
+    <td align="center" width="120"><img src="../../docs/assets/tools/goose.svg" width="32" height="32" alt="" /><br /><sub>Goose</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/auggie.svg" width="32" height="32" alt="" /><br /><sub>Auggie</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/aider.svg" width="32" height="32" alt="" /><br /><sub>Aider</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/crush.svg" width="32" height="32" alt="" /><br /><sub>Crush</sub></td>
     <td align="center" width="120"><img src="../../docs/assets/tools/acp.svg" width="32" height="32" alt="" /><br /><sub>Любой ACP-агент</sub></td>
   </tr>
 </table>
@@ -173,6 +177,10 @@ Friday распространяется по лицензии MIT, не треб
 | **Muse Code** | **Windows** `irm https://dev.meta.ai/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://dev.meta.ai/install.sh \| sh` | `muse login` |
 | **Qwen Code** | `npm install -g @qwen-code/qwen-code` | запустите `qwen` один раз и войдите |
 | **Pi** | `npm install -g @mariozechner/pi-coding-agent` | запустите `pi` один раз и введите `/login` (или задайте API-ключ провайдера) |
+| **Goose** | **Windows** `irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| bash` | запустите `goose configure` и выберите провайдера |
+| **Auggie** | `npm install -g @augmentcode/auggie` | `auggie auth login` |
+| **Aider** | **Windows** `powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 \| iex"` <br> **Mac/Linux** `curl -LsSf https://aider.chat/install.sh \| sh` | задайте API-ключ провайдера (например, `ANTHROPIC_API_KEY`) |
+| **Crush** | `npm install -g @charmland/crush` | `crush login` (или API-ключ провайдера) |
 | **Другой ACP-агент** | любой ACP-агент | любой ACP-агент |
 
 ### Десктопное приложение
@@ -284,7 +292,7 @@ Friday бесплатен и распространяется по лиценз�
 
 Friday разрабатывается открыто, и на каждый pull request отвечают в течение дня. С чего можно начать:
 
-- **Добавьте инструмент для кода.** Для большинства инструментов это короткий адаптер: [goose](https://github.com/splashxmoon/friday-code/issues/36), [Auggie](https://github.com/splashxmoon/friday-code/issues/37), [Aider](https://github.com/splashxmoon/friday-code/issues/38) и [Crush](https://github.com/splashxmoon/friday-code/issues/39) ждут своей очереди, а [руководство](../../docs/adding-a-coding-tool.md) разбирает один пример целиком.
+- **Добавьте инструмент для кода.** Для большинства инструментов это короткий адаптер, а [руководство](../../docs/adding-a-coding-tool.md) проводит через один шаг за шагом.
 - **Соберите пакет.** [Scoop](https://github.com/splashxmoon/friday-code/issues/41) для Windows, [AUR](https://github.com/splashxmoon/friday-code/issues/40) для Arch.
 - **Попробуйте и расскажите.** [Linux AppImage на вашем дистрибутиве](https://github.com/splashxmoon/friday-code/issues/4), [вход в MCP на Windows и Linux](https://github.com/splashxmoon/friday-code/issues/26).
 - **Что-то другое?** [Начните здесь](https://github.com/splashxmoon/friday-code/issues/42), с [good first issues](https://github.com/splashxmoon/friday-code/labels/good%20first%20issue) или с идеи в [Discussions](https://github.com/splashxmoon/friday-code/discussions).

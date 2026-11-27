@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>모든 코딩 에이전트를 하나의 앱에서.</strong><br/>
-  Claude Code, Codex, Cursor 외 15종을 이미 결제 중인 구독 그대로 씁니다. 나란히 함께 돌리거나, 일을 통째로 맡길 수 있습니다. 맡기면 에이전트끼리 일을 나누고, 서로의 작업을 리뷰하고, 하나가 사용량이 떨어지면 다른 에이전트가 이어받습니다. 무료 오픈소스이며 내 컴퓨터에서 돌아갑니다.
+  Claude Code, Codex, Cursor 외 19종을 이미 결제 중인 구독 그대로 씁니다. 나란히 함께 돌리거나, 일을 통째로 맡길 수 있습니다. 맡기면 에이전트끼리 일을 나누고, 서로의 작업을 리뷰하고, 하나가 사용량이 떨어지면 다른 에이전트가 이어받습니다. 무료 오픈소스이며 내 컴퓨터에서 돌아갑니다.
 </p>
 
 <p align="center"><sub><a href="../../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <b>한국어</b> · <a href="README.vi.md">Tiếng Việt</a> · <a href="README.es.md">Español</a> · <a href="README.pt-BR.md">Português</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a></sub></p>
@@ -108,6 +108,10 @@ API 키도, 새 요금제도 필요 없습니다. Friday는 내 컴퓨터에 로
     <td align="center" width="120"><img src="../../docs/assets/tools/pi.svg" width="32" height="32" alt="" /><br /><sub>Pi</sub></td>
   </tr>
   <tr>
+    <td align="center" width="120"><img src="../../docs/assets/tools/goose.svg" width="32" height="32" alt="" /><br /><sub>Goose</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/auggie.svg" width="32" height="32" alt="" /><br /><sub>Auggie</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/aider.svg" width="32" height="32" alt="" /><br /><sub>Aider</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/crush.svg" width="32" height="32" alt="" /><br /><sub>Crush</sub></td>
     <td align="center" width="120"><img src="../../docs/assets/tools/acp.svg" width="32" height="32" alt="" /><br /><sub>모든 ACP 에이전트</sub></td>
   </tr>
 </table>
@@ -172,6 +176,10 @@ Friday는 MIT 라이선스입니다. 계정도 자체 모델도 없고, `127.0.0
 | **Muse Code** | **Windows** `irm https://dev.meta.ai/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://dev.meta.ai/install.sh \| sh` | `muse login` |
 | **Qwen Code** | `npm install -g @qwen-code/qwen-code` | `qwen`을 한 번 실행해 로그인 |
 | **Pi** | `npm install -g @mariozechner/pi-coding-agent` | `pi`를 한 번 실행하고 `/login` 입력(또는 프로바이더의 API 키 설정) |
+| **Goose** | **Windows** `irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| bash` | `goose configure`를 실행해 프로바이더 선택 |
+| **Auggie** | `npm install -g @augmentcode/auggie` | `auggie auth login` |
+| **Aider** | **Windows** `powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 \| iex"` <br> **Mac/Linux** `curl -LsSf https://aider.chat/install.sh \| sh` | 프로바이더의 API 키 설정(예: `ANTHROPIC_API_KEY`) |
+| **Crush** | `npm install -g @charmland/crush` | `crush login`(또는 프로바이더의 API 키) |
 | **그 밖의 ACP 에이전트** | 모든 ACP 에이전트 | 모든 ACP 에이전트 |
 
 ### 데스크톱 앱
@@ -263,7 +271,7 @@ Friday는 `127.0.0.1`에서만 연결을 받으므로 같은 네트워크의 다
 Friday는 찾은 도구만 씁니다. 설정 화면에서 어떤 도구가 설치되어 있고 로그인되어 있는지 보여 주며, 나머지도 대신 로그인해 줄 수 있습니다.
 
 **어떤 코딩 에이전트를 지원하나요?**
-Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, Antigravity CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, Muse Code, 그리고 Agent Client Protocol (ACP)을 지원하는 모든 에이전트입니다.
+Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, Antigravity CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, Muse Code, Qwen Code, Pi, Goose, Auggie, Aider, Crush, 그리고 Agent Client Protocol (ACP)을 지원하는 모든 에이전트입니다.
 
 **비용이 드나요? 내 API 키를 쓰나요?**
 Friday는 무료이고 MIT 라이선스입니다. 작업은 각 도구 자체의 요금제와 로그인으로 돌아가므로, 붙여 넣을 키도 추가로 낼 돈도 없습니다. Friday 자체 에이전트인 Friday Code도 쓰고 싶다면 Settings › Your models에서 내 키나 내 컴퓨터의 모델을 지정하세요. 그러면 Friday Code가 그것으로 동작합니다.
@@ -283,7 +291,7 @@ Friday를 통해서는 나가지 않습니다. Friday는 계정 없이 `127.0.0.
 
 Friday는 공개적으로 개발되며, 모든 풀 리퀘스트에 하루 안에 답합니다. 시작하기 좋은 곳:
 
-- **코딩 도구 추가하기.** 대부분의 도구는 짧은 어댑터 하나면 됩니다. [goose](https://github.com/splashxmoon/friday-code/issues/36), [Auggie](https://github.com/splashxmoon/friday-code/issues/37), [Aider](https://github.com/splashxmoon/friday-code/issues/38), [Crush](https://github.com/splashxmoon/friday-code/issues/39)가 기다리고 있고, [가이드](../../docs/adding-a-coding-tool.md)에서 하나를 추가하는 과정을 따라가 볼 수 있습니다.
+- **코딩 도구 추가하기.** 대부분의 도구는 짧은 어댑터 하나면 되고, [가이드](../../docs/adding-a-coding-tool.md)에서 하나를 추가하는 과정을 따라가 볼 수 있습니다.
 - **패키징하기.** Windows용 [Scoop](https://github.com/splashxmoon/friday-code/issues/41), Arch용 [AUR](https://github.com/splashxmoon/friday-code/issues/40).
 - **써 보고 알려 주기.** [내 배포판에서의 Linux AppImage](https://github.com/splashxmoon/friday-code/issues/4), [Windows와 Linux에서의 MCP 로그인](https://github.com/splashxmoon/friday-code/issues/26).
 - **그 밖에는?** [여기서 시작하세요](https://github.com/splashxmoon/friday-code/issues/42). [good first issues](https://github.com/splashxmoon/friday-code/labels/good%20first%20issue)를 보거나, [Discussions](https://github.com/splashxmoon/friday-code/discussions)에 아이디어를 올려도 됩니다.

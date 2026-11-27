@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>すべてのコーディングエージェントを、ひとつのアプリで。</strong><br/>
-  Claude Code、Codex、Cursor ほか 15 種類を、すでに契約しているサブスクリプションのまま使えます。並べて同時に動かすことも、仕事をまとめて任せることもできます。任せると、エージェント同士で仕事を分け、互いの作業をレビューし、どれかの使用量が尽きたら別のエージェントが引き継ぎます。無料のオープンソースで、あなたのコンピューター上で動きます。
+  Claude Code、Codex、Cursor ほか 19 種類を、すでに契約しているサブスクリプションのまま使えます。並べて同時に動かすことも、仕事をまとめて任せることもできます。任せると、エージェント同士で仕事を分け、互いの作業をレビューし、どれかの使用量が尽きたら別のエージェントが引き継ぎます。無料のオープンソースで、あなたのコンピューター上で動きます。
 </p>
 
 <p align="center"><sub><a href="../../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <b>日本語</b> · <a href="README.ko.md">한국어</a> · <a href="README.vi.md">Tiếng Việt</a> · <a href="README.es.md">Español</a> · <a href="README.pt-BR.md">Português</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a></sub></p>
@@ -108,6 +108,10 @@ API キーも新しいプランも要りません。Friday は、コンピュー
     <td align="center" width="120"><img src="../../docs/assets/tools/pi.svg" width="32" height="32" alt="" /><br /><sub>Pi</sub></td>
   </tr>
   <tr>
+    <td align="center" width="120"><img src="../../docs/assets/tools/goose.svg" width="32" height="32" alt="" /><br /><sub>Goose</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/auggie.svg" width="32" height="32" alt="" /><br /><sub>Auggie</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/aider.svg" width="32" height="32" alt="" /><br /><sub>Aider</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/crush.svg" width="32" height="32" alt="" /><br /><sub>Crush</sub></td>
     <td align="center" width="120"><img src="../../docs/assets/tools/acp.svg" width="32" height="32" alt="" /><br /><sub>任意の ACP エージェント</sub></td>
   </tr>
 </table>
@@ -172,6 +176,10 @@ AI チームメイトをコンピューター上に置いておけます。そ�
 | **Muse Code** | **Windows** `irm https://dev.meta.ai/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://dev.meta.ai/install.sh \| sh` | `muse login` |
 | **Qwen Code** | `npm install -g @qwen-code/qwen-code` | `qwen` を一度実行してサインイン |
 | **Pi** | `npm install -g @mariozechner/pi-coding-agent` | `pi` を一度実行して `/login` と入力（またはプロバイダーの API キーを設定） |
+| **Goose** | **Windows** `irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| bash` | `goose configure` を実行してプロバイダーを選ぶ |
+| **Auggie** | `npm install -g @augmentcode/auggie` | `auggie auth login` |
+| **Aider** | **Windows** `powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 \| iex"` <br> **Mac/Linux** `curl -LsSf https://aider.chat/install.sh \| sh` | プロバイダーの API キーを設定（例: `ANTHROPIC_API_KEY`） |
+| **Crush** | `npm install -g @charmland/crush` | `crush login`（またはプロバイダーの API キー） |
 | **その他の ACP エージェント** | 任意の ACP エージェント | 任意の ACP エージェント |
 
 ### デスクトップアプリ
@@ -263,7 +271,7 @@ Friday は `127.0.0.1` でのみ待ち受けるので、同じネットワーク
 Friday は見つかったツールだけを使います。セットアップ画面に、どれがインストール済みでサインイン済みかが表示され、残りのサインインも代わりに行えます。
 
 **どのコーディングエージェントに対応していますか？**
-Claude Code、Codex、Cursor、GitHub Copilot、Gemini CLI、Antigravity CLI、OpenCode、Devin CLI、Junie、Kiro、Factory Droid、Grok Build、Cline、Kilo Code、Amp、Muse Code、そして Agent Client Protocol (ACP) を話す任意のエージェントです。
+Claude Code、Codex、Cursor、GitHub Copilot、Gemini CLI、Antigravity CLI、OpenCode、Devin CLI、Junie、Kiro、Factory Droid、Grok Build、Cline、Kilo Code、Amp、Muse Code、Qwen Code、Pi、Goose、Auggie、Aider、Crush、そして Agent Client Protocol (ACP) を話す任意のエージェントです。
 
 **費用はかかりますか？ API キーを使いますか？**
 Friday は無料で、MIT ライセンスです。作業は各ツール自身のプランとサインインで動くので、貼り付けるキーも追加の支払いもありません。Friday 独自のエージェントである Friday Code も使いたい場合は、Settings › Your models であなたのキーかコンピューター上のモデルを指定してください。Friday Code はそれで動きます。
@@ -283,7 +291,7 @@ Friday 経由では出ません。Friday はアカウントなしで `127.0.0.1`
 
 Friday はオープンに開発されていて、すべてのプルリクエストに 1 日以内に返信します。始めるのにおすすめの場所：
 
-- **コーディングツールを追加する。** ほとんどのツールは短いアダプターで済みます。[goose](https://github.com/splashxmoon/friday-code/issues/36)、[Auggie](https://github.com/splashxmoon/friday-code/issues/37)、[Aider](https://github.com/splashxmoon/friday-code/issues/38)、[Crush](https://github.com/splashxmoon/friday-code/issues/39) が担当者を待っていて、[ガイド](../../docs/adding-a-coding-tool.md)で 1 つ追加する流れを説明しています。
+- **コーディングツールを追加する。** ほとんどのツールは短いアダプターで済みます。[ガイド](../../docs/adding-a-coding-tool.md)で 1 つ追加する流れを説明しています。
 - **パッケージにする。** Windows 向けの [Scoop](https://github.com/splashxmoon/friday-code/issues/41)、Arch 向けの [AUR](https://github.com/splashxmoon/friday-code/issues/40)。
 - **試して報告する。** [お使いのディストリビューションでの Linux AppImage](https://github.com/splashxmoon/friday-code/issues/4)、[Windows と Linux での MCP サインイン](https://github.com/splashxmoon/friday-code/issues/26)。
 - **ほかには？** [こちらから](https://github.com/splashxmoon/friday-code/issues/42)、[good first issues](https://github.com/splashxmoon/friday-code/labels/good%20first%20issue)、または [Discussions](https://github.com/splashxmoon/friday-code/discussions) でアイデアを。
