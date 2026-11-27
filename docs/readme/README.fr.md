@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Une seule app pour tous vos agents de code.</strong><br/>
-  Claude Code, Codex, Cursor et 15 autres, avec les abonnements que vous payez déjà. Faites-les tourner côte à côte, ou confiez-leur une tâche : ils se la répartissent, relisent le travail des autres et prennent le relais quand l'un d'eux n'a plus de quota. Gratuit et open source, sur votre propre ordinateur.
+  Claude Code, Codex, Cursor et 19 autres, avec les abonnements que vous payez déjà. Faites-les tourner côte à côte, ou confiez-leur une tâche : ils se la répartissent, relisent le travail des autres et prennent le relais quand l'un d'eux n'a plus de quota. Gratuit et open source, sur votre propre ordinateur.
 </p>
 
 <p align="center"><sub><a href="../../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.vi.md">Tiếng Việt</a> · <a href="README.es.md">Español</a> · <a href="README.pt-BR.md">Português</a> · <b>Français</b> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a></sub></p>
@@ -108,6 +108,10 @@ Pas de clé API ni de nouvel abonnement : Friday pilote les outils de code conne
     <td align="center" width="120"><img src="../../docs/assets/tools/pi.svg" width="32" height="32" alt="" /><br /><sub>Pi</sub></td>
   </tr>
   <tr>
+    <td align="center" width="120"><img src="../../docs/assets/tools/goose.svg" width="32" height="32" alt="" /><br /><sub>Goose</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/auggie.svg" width="32" height="32" alt="" /><br /><sub>Auggie</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/aider.svg" width="32" height="32" alt="" /><br /><sub>Aider</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/crush.svg" width="32" height="32" alt="" /><br /><sub>Crush</sub></td>
     <td align="center" width="120"><img src="../../docs/assets/tools/acp.svg" width="32" height="32" alt="" /><br /><sub>N'importe quel agent ACP</sub></td>
   </tr>
 </table>
@@ -172,6 +176,10 @@ Gardez des coéquipiers IA sur votre ordinateur, chacun avec un nom, un rôle, u
 | **Muse Code** | **Windows** `irm https://dev.meta.ai/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://dev.meta.ai/install.sh \| sh` | `muse login` |
 | **Qwen Code** | `npm install -g @qwen-code/qwen-code` | lancez `qwen` une fois et connectez-vous |
 | **Pi** | `npm install -g @mariozechner/pi-coding-agent` | lancez `pi` une fois et tapez `/login` (ou définissez la clé API d'un fournisseur) |
+| **Goose** | **Windows** `irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| bash` | lancez `goose configure` et choisissez un fournisseur |
+| **Auggie** | `npm install -g @augmentcode/auggie` | `auggie auth login` |
+| **Aider** | **Windows** `powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 \| iex"` <br> **Mac/Linux** `curl -LsSf https://aider.chat/install.sh \| sh` | définissez la clé API d'un fournisseur (par ex. `ANTHROPIC_API_KEY`) |
+| **Crush** | `npm install -g @charmland/crush` | `crush login` (ou la clé API d'un fournisseur) |
 | **Autre agent ACP** | selon l'agent ACP | selon l'agent ACP |
 
 ### L'application de bureau
@@ -263,7 +271,7 @@ Non. Friday tourne sur votre ordinateur à l'adresse `127.0.0.1`, sans compte, e
 Friday n'utilise que les outils qu'il trouve. Son écran de configuration montre lesquels sont installés et connectés, et peut connecter les autres pour vous.
 
 **Quels agents de code sont pris en charge ?**
-Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, Antigravity CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, Muse Code, et tout agent qui parle l'Agent Client Protocol (ACP).
+Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, Antigravity CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, Muse Code, Qwen Code, Pi, Goose, Auggie, Aider, Crush, et tout agent qui parle l'Agent Client Protocol (ACP).
 
 **Est-ce payant, ou est-ce que ça utilise mes clés API ?**
 Friday est gratuit et sous licence MIT. Le travail passe par l'abonnement et la connexion de chaque outil, donc il n'y a aucune clé à coller et rien de plus à payer. Si vous voulez aussi Friday Code, l'agent de Friday, donnez-lui une de vos clés ou un modèle sur votre ordinateur dans Settings › Your models : il tournera alors avec ça.
@@ -283,7 +291,7 @@ Pas via Friday. Il tourne sur `127.0.0.1` sans compte ; vos outils de code parle
 
 Friday est développé en public et chaque pull request reçoit une réponse en moins d'un jour. Quelques bons points de départ :
 
-- **Ajouter un outil de code.** La plupart des outils tiennent dans un petit adaptateur : [goose](https://github.com/splashxmoon/friday-code/issues/36), [Auggie](https://github.com/splashxmoon/friday-code/issues/37), [Aider](https://github.com/splashxmoon/friday-code/issues/38) et [Crush](https://github.com/splashxmoon/friday-code/issues/39) attendent preneur, et [le guide](../../docs/adding-a-coding-tool.md) en détaille un pas à pas.
+- **Ajouter un outil de code.** La plupart des outils tiennent dans un petit adaptateur, et [le guide](../../docs/adding-a-coding-tool.md) en détaille un pas à pas.
 - **Le packager.** [Scoop](https://github.com/splashxmoon/friday-code/issues/41) pour Windows, [l'AUR](https://github.com/splashxmoon/friday-code/issues/40) pour Arch.
 - **L'essayer et faire un retour.** [L'AppImage Linux sur votre distribution](https://github.com/splashxmoon/friday-code/issues/4), [la connexion MCP sur Windows et Linux](https://github.com/splashxmoon/friday-code/issues/26).
 - **Autre chose ?** [Commencez ici](https://github.com/splashxmoon/friday-code/issues/42), avec les [good first issues](https://github.com/splashxmoon/friday-code/labels/good%20first%20issue), ou proposez une idée dans [Discussions](https://github.com/splashxmoon/friday-code/discussions).

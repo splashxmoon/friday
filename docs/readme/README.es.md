@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Una sola app para todos tus agentes de programación.</strong><br/>
-  Claude Code, Codex, Cursor y 15 más, con las suscripciones que ya pagas. Ejecútalos lado a lado o dales un trabajo: lo reparten, revisan el trabajo de los demás y uno continúa cuando otro se queda sin uso. Gratis y de código abierto, en tu propia computadora.
+  Claude Code, Codex, Cursor y 19 más, con las suscripciones que ya pagas. Ejecútalos lado a lado o dales un trabajo: lo reparten, revisan el trabajo de los demás y uno continúa cuando otro se queda sin uso. Gratis y de código abierto, en tu propia computadora.
 </p>
 
 <p align="center"><sub><a href="../../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.vi.md">Tiếng Việt</a> · <b>Español</b> · <a href="README.pt-BR.md">Português</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a></sub></p>
@@ -109,6 +109,10 @@ Sin API keys y sin un plan nuevo: Friday usa las herramientas de programación c
     <td align="center" width="120"><img src="../../docs/assets/tools/pi.svg" width="32" height="32" alt="" /><br /><sub>Pi</sub></td>
   </tr>
   <tr>
+    <td align="center" width="120"><img src="../../docs/assets/tools/goose.svg" width="32" height="32" alt="" /><br /><sub>Goose</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/auggie.svg" width="32" height="32" alt="" /><br /><sub>Auggie</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/aider.svg" width="32" height="32" alt="" /><br /><sub>Aider</sub></td>
+    <td align="center" width="120"><img src="../../docs/assets/tools/crush.svg" width="32" height="32" alt="" /><br /><sub>Crush</sub></td>
     <td align="center" width="120"><img src="../../docs/assets/tools/acp.svg" width="32" height="32" alt="" /><br /><sub>Cualquier agente ACP</sub></td>
   </tr>
 </table>
@@ -173,6 +177,10 @@ Ten compañeros de IA en tu computadora, cada uno con un nombre, un rol, una mem
 | **Muse Code** | **Windows** `irm https://dev.meta.ai/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://dev.meta.ai/install.sh \| sh` | `muse login` |
 | **Qwen Code** | `npm install -g @qwen-code/qwen-code` | ejecuta `qwen` una vez e inicia sesión |
 | **Pi** | `npm install -g @mariozechner/pi-coding-agent` | ejecuta `pi` una vez y escribe `/login` (o configura la API key de un proveedor) |
+| **Goose** | **Windows** `irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| bash` | ejecuta `goose configure` y elige un proveedor |
+| **Auggie** | `npm install -g @augmentcode/auggie` | `auggie auth login` |
+| **Aider** | **Windows** `powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 \| iex"` <br> **Mac/Linux** `curl -LsSf https://aider.chat/install.sh \| sh` | configura la API key de un proveedor (p. ej., `ANTHROPIC_API_KEY`) |
+| **Crush** | `npm install -g @charmland/crush` | `crush login` (o la API key de un proveedor) |
 | **Otro agente ACP** | cualquier agente ACP | cualquier agente ACP |
 
 ### La app de escritorio
@@ -284,7 +292,7 @@ No a través de Friday. Corre en `127.0.0.1` sin cuenta; tus herramientas de pro
 
 Friday se construye en abierto y cada pull request recibe respuesta en menos de un día. Buenos lugares para empezar:
 
-- **Agrega una herramienta de programación.** La mayoría de las herramientas son un adaptador corto: [goose](https://github.com/splashxmoon/friday-code/issues/36), [Auggie](https://github.com/splashxmoon/friday-code/issues/37), [Aider](https://github.com/splashxmoon/friday-code/issues/38) y [Crush](https://github.com/splashxmoon/friday-code/issues/39) están esperando, y [la guía](../../docs/adding-a-coding-tool.md) explica cómo hacer uno paso a paso.
+- **Agrega una herramienta de programación.** La mayoría de las herramientas son un adaptador corto, y [la guía](../../docs/adding-a-coding-tool.md) explica cómo hacer uno paso a paso.
 - **Empaquétalo.** [Scoop](https://github.com/splashxmoon/friday-code/issues/41) para Windows, [el AUR](https://github.com/splashxmoon/friday-code/issues/40) para Arch.
 - **Pruébalo y cuéntanos.** [El AppImage de Linux en tu distro](https://github.com/splashxmoon/friday-code/issues/4), [inicio de sesión MCP en Windows y Linux](https://github.com/splashxmoon/friday-code/issues/26).
 - **¿Otra cosa?** [Empieza aquí](https://github.com/splashxmoon/friday-code/issues/42), los [good first issues](https://github.com/splashxmoon/friday-code/labels/good%20first%20issue), o una idea en [Discussions](https://github.com/splashxmoon/friday-code/discussions).
