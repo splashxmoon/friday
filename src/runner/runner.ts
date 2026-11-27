@@ -1928,6 +1928,8 @@ ${prompt}`;
     this.steerTurn = null;
     if (systemFile) void unlink(systemFile).catch(() => {});
 
+    // A tool whose turn ends with its process (plainText) says how it ended only now.
+    if (parse.end) for (const out of parse.end(exit.code)) this.forward(out, onDone, (n) => (note = n));
     const finished = done as { error?: string } | null;
     let outcome: "done" | "stopped" | "error" = "done";
     let error: string | undefined;
