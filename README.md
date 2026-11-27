@@ -143,6 +143,7 @@ Keep AI teammates on your computer, each with a name, a role, a memory and its o
 - **Automations:** on a schedule, a webhook, or when another session finishes; one tool or several splitting the work; ends in a pull request for you to review.
 - **Git built in:** stage by hunk, commit, push, open a PR.
 - **Friday Code:** Friday's own agent, on an API key of yours or a local model (Ollama, LM Studio).
+- **MCP servers:** connect a service once and Claude Code, Codex, Amp and the ACP tools all get it ([guide](docs/mcp-servers.md)).
 - **Let other agents use Friday:** Claude Code, Codex or any MCP client on your computer can start Friday sessions and hand them work (`claude mcp add friday --scope user -- node ~/.friday/outside-mcp.mjs`).
 - Live feed, rewind, dev-server preview, terminal, ⌘K for everything, themes, notifications.
 </details>
