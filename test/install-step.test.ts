@@ -50,6 +50,17 @@ test("Auggie is offered by name with its npm install line on every system", () =
   }
 });
 
+test("Goose is offered by name with its install script on every system", () => {
+  assert.ok(ENGINE_TOOLS.includes("goose"));
+  assert.equal(ENGINE_NAMES.goose, "Goose");
+  assert.equal(TOOL_INFO.goose.docs, "https://goose-docs.ai/");
+  assert.deepEqual(ENGINE_MODEL_INFO.goose, []);
+  assert.deepEqual(ENGINE_MODELS.goose, []);
+  assert.deepEqual(installStep("goose", "windows"), { shell: "PowerShell", command: "irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 | iex" });
+  assert.deepEqual(installStep("goose", "mac"), { shell: "Terminal", command: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash" });
+  assert.deepEqual(installStep("goose", "linux"), { shell: "Shell", command: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash" });
+});
+
 test("the system is read from the desktop app when it says, and from the browser otherwise", () => {
   assert.equal(osOf("win32", ""), "windows");
   assert.equal(osOf("darwin", ""), "mac");

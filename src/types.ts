@@ -208,7 +208,7 @@ export type SessionOptionsPatch = Partial<Omit<SessionOptions, "policy">> & { po
  * holds a key for these: the CLI runs on the host's machine, under their login,
  * and a small runner relays the session to it.
  */
-export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "pi" | "aider" | "crush" | "auggie" | "acp";
+export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "goose" | "pi" | "aider" | "crush" | "auggie" | "acp";
 
 /** What a person sees about a coding tool before and after it is on their machine. Its runner side is in runner/adapters.ts. */
 export interface ToolInfo {
@@ -318,6 +318,9 @@ export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
     note: "macOS and Linux; on Windows, inside WSL.",
   },
   qwen: { name: "Qwen Code", blurb: "Qwen's coding agent", docs: "https://qwenlm.github.io/qwen-code-docs/en/users/", install: { npm: "@qwen-code/qwen-code" }, tint: "#615ced" },
+  // Goose configures its providers interactively (`goose configure`); over ACP it runs `goose acp`. Its mark is black as it ships,
+  // so where a mark is drawn in its tint, a grey that reads on both themes.
+  goose: { name: "Goose", blurb: "The Agentic AI Foundation's coding agent", docs: "https://goose-docs.ai/", install: { windows: "irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 | iex", unix: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash" }, tint: "#71717a" },
   // Mario Zechner's minimal coding agent, over its own RPC mode (runner/adapters.ts pi). It signs in inside itself, with /login.
   pi: {
     name: "Pi",
@@ -355,7 +358,7 @@ export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
     tint: "#8f8f9a",
     note: "Sign in with `auggie auth login`: it opens the browser for your Augment account.",
   },
-  // Any other agent in the ACP registry (goose, Mistral Vibe, Kimi...), by the command somebody sets on their computer.
+  // Any other agent in the ACP registry (Mistral Vibe, Kimi...), by the command somebody sets on their computer.
   acp: {
     name: "Other ACP agent",
     blurb: "Any coding agent that speaks ACP",
@@ -569,6 +572,7 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
     { id: "ultra", label: "Ultra", blurb: "Its strongest, for the hardest tasks." },
   ],
   qwen: [],
+  goose: [],
   // Pi lists the models of every provider it is signed in to, read from its first turn.
   pi: [],
   // Aider and Crush take any model their provider has, typed by name: no fixed list.

@@ -2268,6 +2268,17 @@ export const auggie: Adapter = acp({
   env: () => ({ AUGMENT_DISABLE_AUTO_UPDATE: "1" }),
 });
 
+// Goose configures providers through its interactive `goose configure`. Settings files may hold
+// credentials we cannot detect, so absent keys mean unknown, not signed out.
+export const goose: Adapter = acp({
+  tool: "goose",
+  bins: ["goose"],
+  login: [],
+  logout: [],
+  args: () => ["acp"],
+  status: anyOf([], ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"]),
+});
+
 export const gemini: Adapter = acp({
   tool: "gemini",
   bins: ["gemini"],
@@ -3417,7 +3428,7 @@ export const crush: Adapter = {
   },
 };
 
-export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, pi, aider, crush, auggie, acp: custom };
+export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, goose, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, pi, aider, crush, auggie, acp: custom };
 
 // ── finding the executables ──────────────────────────────────────────
 
