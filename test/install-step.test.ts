@@ -58,4 +58,3 @@ test("the system is read from the desktop app when it says, and from the browser
   assert.equal(osOf(undefined, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"), "mac");
   assert.equal(osOf(undefined, "Mozilla/5.0 (X11; Linux x86_64)"), "linux");
 });
-

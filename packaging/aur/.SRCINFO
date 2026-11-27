@@ -1,0 +1,23 @@
+pkgbase = friday-bin
+	pkgdesc = One app for all your coding agents: Claude Code, Codex, Cursor and more, side by side, on your own computer
+	pkgver = 0.4.4
+	pkgrel = 1
+	url = https://github.com/splashxmoon/friday-code
+	arch = x86_64
+	license = MIT
+	depends = alsa-lib
+	depends = gtk3
+	depends = mesa
+	depends = nss
+	optdepends = libnotify: desktop notifications
+	provides = friday
+	conflicts = friday
+	noextract = Friday-0.4.4-x86_64.AppImage
+	options = !strip
+	options = !debug
+	source = LICENSE-0.4.4::https://raw.githubusercontent.com/splashxmoon/friday-code/v0.4.4/LICENSE
+	sha256sums = a18343685dd04ccfd2369f3cc810de6ab52e6eaf6ee8192ff2287025f74ebd1d
+	source_x86_64 = Friday-0.4.4-x86_64.AppImage::https://github.com/splashxmoon/friday-code/releases/download/v0.4.4/Friday-x86_64.AppImage
+	sha256sums_x86_64 = 36b1b947cbaae0a5e2bc929e95d5b85b9aa15292c1b9b4cc97bc362bf4a28155
+
+pkgname = friday-bin

@@ -284,7 +284,11 @@ export interface AcpKept {
  * `steer`: a message for the turn running now, read at its next step rather than after the turn (another agent's question,
  * a redirect). True when the tool took it; false when it can't, or its turn has just ended, and it waits for the next turn.
  */
-export type Parser = ((line: string) => AdapterOut[]) & { cancel?: () => void; steer?: (text: string) => Promise<boolean> };
+/**
+ * `end`: what it says once its process has ended, given the exit code, for a tool whose turn ends with the process rather than
+ * with a line of its own (plainText).
+ */
+export type Parser = ((line: string) => AdapterOut[]) & { cancel?: () => void; steer?: (text: string) => Promise<boolean>; end?: (code: number | null) => AdapterOut[] };
 
 export interface Adapter {
   tool: EngineTool;
@@ -2258,7 +2262,7 @@ export const auggie: Adapter = acp({
   tool: "auggie",
   bins: ["auggie"],
   login: ["auth", "login"],
-  logout: [],
+  logout: ["auth", "logout"],
   status: anyOf([".augment/session.json"], ["AUGMENT_API_TOKEN", "AUGMENT_SESSION_AUTH"]),
   args: () => ["--acp"],
   env: () => ({ AUGMENT_DISABLE_AUTO_UPDATE: "1" }),
@@ -3254,7 +3258,166 @@ export const pi: Adapter = {
   },
 };
 
-export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, auggie, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, pi, acp: custom };
+// ── tools that print plain text ──────────────────────────────────────
+
+/**
+ * A parser for a tool with no event stream of its own (Aider, Crush): what it prints is its answer, a line at a time, and the
+ * process ending is the turn ending. `line` sorts a line that isn't plain answer text (a token count, an edit it applied, its
+ * banner) into what it says instead; anything it leaves alone streams as text. The answer so far is kept as a message before a
+ * tool card and when the process ends, as the JSON tools' answers are. A clean exit is `done`; any other exit says nothing, so
+ * the runner reports the tool's own last words on stderr.
+ */
+export function plainText(line?: (l: string) => AdapterOut[] | null, onEnd?: (ok: boolean) => AdapterOut[]): Parser {
+  let text = "";
+  const flush = (): AdapterOut[] => {
+    const t = text.replace(/\s+$/, "");
+    text = "";
+    return t ? [{ kind: "message", text: t, toolCalls: [] }] : [];
+  };
+  const parse = ((raw: string): AdapterOut[] => {
+    const l = raw.replace(/\r$/, "");
+    const own = line?.(l);
+    if (own) return own.some((o) => o.kind === "message" || o.kind === "result") ? [...flush(), ...own] : own;
+    // Leading blank lines say nothing; later ones are the answer's own paragraphs.
+    if (!text && !l.trim()) return [];
+    text += `${l}\n`;
+    return [{ kind: "delta", text: `${l}\n`, channel: "text" }];
+  }) as Parser;
+  parse.end = (code) => (code === 0 ? [...flush(), ...(onEnd?.(true) ?? []), { kind: "done" }] : [...flush(), ...(onEnd?.(false) ?? [])]);
+  return parse;
+}
+
+/** "2.6k" and "92" as Aider prints its token counts. */
+const tokens = (n: string | undefined, k: string | undefined) => (n ? Math.round(Number(n) * (k ? 1000 : 1)) : 0);
+
+/** Aider's own lines about itself rather than the answer: its banner, the files it sees, its warnings. */
+const AIDER_SAYS = /^(?:Aider v\d|Main model:|Weak model:|Editor model:|Model:|Git repo:|Repo-map:|Added .+ to the chat|Use \/help|Cur working dir:|Note: in-chat|Warning:|Can't initialize prompt toolkit|Newer aider version|Run pip install|Update git name|Scanning repo:|Initial repo scan|https:\/\/aider\.chat\/)/;
+const AIDER_TOKENS = /^Tokens: ([\d.]+)(k?) sent(?:, ([\d.]+)(k?) cache write)?(?:, ([\d.]+)(k?) cache hit)?, ([\d.]+)(k?) received/;
+
+/** Aider's lines that aren't answer text: its token counts as usage, each file it changed as an edit card, its banner aside. */
+export function aiderLine(l: string, id: () => string): AdapterOut[] | null {
+  const used = AIDER_TOKENS.exec(l);
+  if (used) {
+    const cacheWrite = tokens(used[3], used[4]);
+    const cached = tokens(used[5], used[6]);
+    return usage(tokens(used[1], used[2]), cached, tokens(used[7], used[8]), undefined, cacheWrite ? { cacheWrite } : {});
+  }
+  const edited = /^Applied edit to (.+)$/.exec(l);
+  if (edited) {
+    const file = edited[1]!.trim();
+    const c = call(id(), "edit", { path: file });
+    return [{ kind: "message", text: "", toolCalls: [c] }, result(c.id, "edit", `Edited ${file}`, false)];
+  }
+  if (/^Did not apply edit to /.test(l) || /^The LLM did not conform to the edit format/.test(l)) return [{ kind: "note", text: l }];
+  if (AIDER_SAYS.test(l)) return [{ kind: "delta", text: `${l}\n`, channel: "reasoning" }];
+  return null;
+}
+
+/**
+ * Where an Aider conversation is kept: its chat history file, outside the repository so the person's working tree and .gitignore
+ * are left alone, named once for each turn so `args` and `parser` agree. That file's path is the conversation's id: the next turn
+ * hands it back with --restore-chat-history, and Aider reads its memory from it.
+ */
+const aiderFiles = new WeakMap<TurnSpec, string>();
+const aiderHome = () => path.join(homedir(), ".friday", "aider");
+export function aiderHistory(t: TurnSpec): string {
+  const had = aiderFiles.get(t);
+  if (had) return had;
+  const kept = !t.ephemeral && t.resumeId && path.isAbsolute(t.resumeId) && t.resumeId.endsWith(".md") && existsSync(t.resumeId) ? t.resumeId : null;
+  const file = kept ?? path.join(aiderHome(), `${randomUUID()}.md`);
+  aiderFiles.set(t, file);
+  return file;
+}
+
+/** Friday's effort levels in the three Aider and Crush take. */
+const lowMediumHigh = (e: string) => (e === "low" || e === "medium" ? e : "high");
+
+/**
+ * Aider (`aider`), which speaks no protocol: one `aider --message` a turn, answering in plain text (`--no-pretty`, no colours or
+ * boxes). Auto says yes to everything it asks (`--yes-always`); Plan is its own ask mode, which answers without editing. It can't
+ * ask before each change, so there is no Manual. It doesn't commit (`--no-auto-commits`): what it changed is left for Friday's
+ * review and the person, as every other tool's changes are. Its sign-in is a provider's API key in the environment or its config.
+ */
+export const aider: Adapter = {
+  tool: "aider",
+  bins: ["aider"],
+  login: [],
+  logout: [],
+  modes: ["full", "plan"],
+  args(t) {
+    const history = aiderHistory(t);
+    mkdirSync(path.dirname(history), { recursive: true });
+    return [
+      "--message",
+      notedPrompt(t),
+      "--yes-always",
+      "--no-pretty",
+      "--no-stream",
+      "--no-fancy-input",
+      "--no-auto-commits",
+      "--no-dirty-commits",
+      "--no-gitignore",
+      "--no-check-update",
+      "--no-show-release-notes",
+      "--analytics-disable",
+      "--chat-history-file",
+      history,
+      "--input-history-file",
+      path.join(aiderHome(), "input.history"),
+      ...(history === t.resumeId ? ["--restore-chat-history"] : []),
+      ...(t.mode === "plan" ? ["--chat-mode", "ask"] : []),
+      ...(t.model ? ["--model", t.model] : []),
+      ...(t.effort && offered(t, "--reasoning-effort") ? ["--reasoning-effort", lowMediumHigh(t.effort)] : []),
+    ];
+  },
+  optional: ["--reasoning-effort"],
+  stdin: () => "",
+  parser(t) {
+    let n = 0;
+    const history = t && !t.ephemeral ? aiderHistory(t) : null;
+    return plainText(
+      (l) => aiderLine(l, () => `aider-${++n}`),
+      (ok) => (ok && history ? [{ kind: "session", id: history }] : []),
+    );
+  },
+  explain(e) {
+    if (/api[_ ]?key|AuthenticationError|No LLM model was specified|Unable to find API key/i.test(e)) return "Aider has no model provider set up on the computer it runs on. Set a provider's API key there (ANTHROPIC_API_KEY, OPENAI_API_KEY, or another in Aider's config), then send the instruction again.";
+    if (/not a git repo|Unable to find a git repo/i.test(e)) return "Aider works in a git repository. Open a folder that is one, then send the instruction again.";
+    return e;
+  },
+};
+
+/** Crush's conversation, as Friday keeps it: "its latest one in this folder", which `--continue` picks up. */
+export const CRUSH_LAST = "crush-latest";
+
+/**
+ * Crush (Charm's coding agent, `crush`), which speaks no ACP: one `crush run` a turn, the instruction on stdin and its answer
+ * printed as plain text (`--quiet`, no spinner). A non-interactive run approves everything itself, so it runs only in Auto. It
+ * prints no conversation id, so the next turn carries on its most recent conversation in this folder (`--continue`).
+ */
+export const crush: Adapter = {
+  tool: "crush",
+  bins: ["crush"],
+  login: ["login"],
+  logout: ["logout"],
+  modes: ["full"],
+  args: (t) => [
+    "run",
+    "--quiet",
+    ...(t.resumeId && !t.ephemeral ? ["--continue"] : []),
+    ...(t.model ? ["--model", t.model] : []),
+    ...(t.effort && offered(t, "--reasoning-effort") ? ["--reasoning-effort", lowMediumHigh(t.effort)] : []),
+  ],
+  optional: ["--reasoning-effort"],
+  stdin: (t) => notedPrompt(t),
+  parser: (t) => plainText(undefined, (ok) => (ok && !t?.ephemeral ? [{ kind: "session", id: CRUSH_LAST }] : [])),
+  explain(e) {
+    if (/no providers? (?:configured|found)|not (?:logged|signed) in|unauthori[sz]ed|api key|401/i.test(e)) return "Crush has no model provider set up on the computer it runs on. Run `crush login` there (or set a provider's API key), then send the instruction again.";
+    return e;
+  },
+};
+
+export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, pi, aider, crush, auggie, acp: custom };
 
 // ── finding the executables ──────────────────────────────────────────
 
@@ -3801,4 +3964,3 @@ export async function launcher(bin: string): Promise<Launch> {
   }
   return { command: bin, prefix: [] };
 }
-

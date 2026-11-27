@@ -15,7 +15,7 @@ test("Auggie is registered as an ACP tool with its own entry", () => {
   assert.deepEqual(auggie.bins, ["auggie"]);
   assert.deepEqual(auggie.args({ prompt: "Check the tests", system: "", resumeId: null, mode: "edits" }), ["--acp"]);
   assert.deepEqual(auggie.login, ["auth", "login"]);
-  assert.deepEqual(auggie.logout, []);
+  assert.deepEqual(auggie.logout, ["auth", "logout"]);
 });
 
 test("Auggie's sign-in is its session file or a token, never a guess", async () => {

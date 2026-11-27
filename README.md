@@ -9,12 +9,15 @@
   Claude Code, Codex, Cursor and 15 more, on the subscriptions you already pay for. Run them side by side, or hand them a job: they split it, review each other's work, and pick up when one runs out. Free and open source, on your own computer.
 </p>
 
+<p align="center"><sub><b>English</b> · <a href="docs/readme/README.zh-CN.md">简体中文</a> · <a href="docs/readme/README.zh-TW.md">繁體中文</a> · <a href="docs/readme/README.ja.md">日本語</a> · <a href="docs/readme/README.ko.md">한국어</a> · <a href="docs/readme/README.vi.md">Tiếng Việt</a> · <a href="docs/readme/README.es.md">Español</a> · <a href="docs/readme/README.pt-BR.md">Português</a> · <a href="docs/readme/README.fr.md">Français</a> · <a href="docs/readme/README.de.md">Deutsch</a> · <a href="docs/readme/README.ru.md">Русский</a></sub></p>
+
 <p align="center">
   <a href="https://github.com/splashxmoon/friday-code/stargazers"><img src="https://img.shields.io/github/stars/splashxmoon/friday-code?style=flat&label=%E2%98%85&color=08C" alt="GitHub stars" /></a>
   <img src="https://img.shields.io/badge/license-MIT-08C?style=flat" alt="License: MIT" />
   <img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-4493F8?style=flat" alt="macOS, Windows and Linux" />
   <a href="https://github.com/splashxmoon/friday-code/actions/workflows/ci.yml"><img src="https://github.com/splashxmoon/friday-code/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
 </p>
+
 
 <p align="center">
   <a href="https://github.com/splashxmoon/friday-code/releases/latest/download/Friday-arm64.dmg"><b>Mac (Apple silicon)</b></a> ·
@@ -105,6 +108,8 @@ No API keys and no new plan: Friday drives the coding tools signed in on your co
     <td align="center" width="120"><img src="docs/assets/tools/pi.svg" width="32" height="32" alt="" /><br /><sub>Pi</sub></td>
   </tr>
   <tr>
+    <td align="center" width="120"><img src="docs/assets/tools/aider.svg" width="32" height="32" alt="" /><br /><sub>Aider</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/crush.svg" width="32" height="32" alt="" /><br /><sub>Crush</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/acp.svg" width="32" height="32" alt="" /><br /><sub>Any ACP agent</sub></td>
   </tr>
 </table>
@@ -169,6 +174,8 @@ Keep AI teammates on your computer, each with a name, a role, a memory and its o
 | **Muse Code** | **Windows** `irm https://dev.meta.ai/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://dev.meta.ai/install.sh \| sh` | `muse login` |
 | **Qwen Code** | `npm install -g @qwen-code/qwen-code` | run `qwen` once and sign in |
 | **Pi** | `npm install -g @mariozechner/pi-coding-agent` | run `pi` once and type `/login` (or set a provider's API key) |
+| **Aider** | **Windows** `powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 \| iex"` <br> **Mac/Linux** `curl -LsSf https://aider.chat/install.sh \| sh` | set a provider's API key (e.g. `ANTHROPIC_API_KEY`) |
+| **Crush** | `npm install -g @charmland/crush` | `crush login` (or a provider's API key) |
 | **Other ACP agent** | any ACP agent | any ACP agent |
 
 ### The desktop app
