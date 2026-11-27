@@ -2,6 +2,8 @@
 
 An MCP server gives a coding tool more to work with: your issues, your docs, a database, a design file. In Friday you set one up once, on the **Plugins** page, and your coding tools get it from then on. Open **Customize** on the rail and pick **Plugins**, or find **Plugins** with ⌘K.
 
+![The Plugins page: a search over the services, Custom server at the top right, the kinds of service down the side, and cards that say how each one connects (Sign in, Your app, Runs here)](assets/mcp/plugins-page.png)
+
 ## What the page does
 
 You connect a server once, and Friday hands it to these tools on their next turn, with no restart:
@@ -65,7 +67,11 @@ asks only for `GITHUB_TOKEN`, and this block adds two servers and asks only for 
 }
 ```
 
+![Add a custom server, after pasting the JSON block above: filesystem runs here, acme is remote, and only the Authorization header is asked for](assets/mcp/paste-a-config.png)
+
 When you add a server, Friday starts it once, does the MCP handshake and asks for its list of tools. If that works, it's on for every tool. If it doesn't, it's still saved, turned off, with the reason in plain words, and you'll find it under **Your own**.
+
+![Both servers under Your own: filesystem is Connected, acme Needs you because nothing answers at its example address](assets/mcp/your-own-servers.png)
 
 A remote server that wants you to sign in, rather than take a key, shows **Needs sign-in**: Custom server takes a key, not a sign-in.
 
