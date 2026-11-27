@@ -3247,7 +3247,7 @@ export const pi: Adapter = {
 // ── tools that print plain text ──────────────────────────────────────
 
 /**
- * A parser for a tool with no event stream of its own (Aider): what it prints is its answer, a line at a time, and the
+ * A parser for a tool with no event stream of its own (Aider, Crush): what it prints is its answer, a line at a time, and the
  * process ending is the turn ending. `line` sorts a line that isn't plain answer text (a token count, an edit it applied, its
  * banner) into what it says instead; anything it leaves alone streams as text. The answer so far is kept as a message before a
  * tool card and when the process ends, as the JSON tools' answers are. A clean exit is `done`; any other exit says nothing, so
@@ -3315,7 +3315,7 @@ export function aiderHistory(t: TurnSpec): string {
   return file;
 }
 
-/** Friday's effort levels in the three Aider takes. */
+/** Friday's effort levels in the three Aider and Crush take. */
 const lowMediumHigh = (e: string) => (e === "low" || e === "medium" ? e : "high");
 
 /**
@@ -3373,7 +3373,37 @@ export const aider: Adapter = {
   },
 };
 
-export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, pi, aider, acp: custom };
+/** Crush's conversation, as Friday keeps it: "its latest one in this folder", which `--continue` picks up. */
+export const CRUSH_LAST = "crush-latest";
+
+/**
+ * Crush (Charm's coding agent, `crush`), which speaks no ACP: one `crush run` a turn, the instruction on stdin and its answer
+ * printed as plain text (`--quiet`, no spinner). A non-interactive run approves everything itself, so it runs only in Auto. It
+ * prints no conversation id, so the next turn carries on its most recent conversation in this folder (`--continue`).
+ */
+export const crush: Adapter = {
+  tool: "crush",
+  bins: ["crush"],
+  login: ["login"],
+  logout: ["logout"],
+  modes: ["full"],
+  args: (t) => [
+    "run",
+    "--quiet",
+    ...(t.resumeId && !t.ephemeral ? ["--continue"] : []),
+    ...(t.model ? ["--model", t.model] : []),
+    ...(t.effort && offered(t, "--reasoning-effort") ? ["--reasoning-effort", lowMediumHigh(t.effort)] : []),
+  ],
+  optional: ["--reasoning-effort"],
+  stdin: (t) => notedPrompt(t),
+  parser: (t) => plainText(undefined, (ok) => (ok && !t?.ephemeral ? [{ kind: "session", id: CRUSH_LAST }] : [])),
+  explain(e) {
+    if (/no providers? (?:configured|found)|not (?:logged|signed) in|unauthori[sz]ed|api key|401/i.test(e)) return "Crush has no model provider set up on the computer it runs on. Run `crush login` there (or set a provider's API key), then send the instruction again.";
+    return e;
+  },
+};
+
+export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, pi, aider, crush, acp: custom };
 
 // ── finding the executables ──────────────────────────────────────────
 

@@ -14,7 +14,7 @@
  * 2026-10-29: "can we bring back some for the coding tool icons like their actual icons like claude should be that orange").
  */
 
-import { BotIcon, FactoryIcon, UsersIcon } from "lucide-react";
+import { BotIcon, FactoryIcon, HeartIcon, UsersIcon } from "lucide-react";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
 import { useId, type ReactNode } from "react";
 
@@ -208,8 +208,9 @@ export function EngineMark({ tool, size = 15, className }: { tool: EngineTool | 
   // Muse Code's own mark, the blue scribbled "M" (Arun, 2026-11-18: "use this for the muse code icon as well").
   if (tool === "muse") return <MuseMark size={size} className={className} />;
   if (tool === "antigravity") return <AntigravityMark size={size} className={className} />;
-  // Aider has no mark in an open set: a pair (it is pair programming), beside its name.
+  // Neither has a mark in an open set: a pair (Aider is pair programming) and a heart (Crush), beside their names.
   if (tool === "aider") return <UsersIcon size={size} className={className} aria-label={ENGINE_NAMES.aider} style={{ flex: "none" }} />;
+  if (tool === "crush") return <HeartIcon size={size} className={className} aria-label={ENGINE_NAMES.crush} style={{ flex: "none" }} />;
   if (tool === "acp") return <BotIcon size={size} className={className} aria-label={ENGINE_NAMES.acp} style={{ flex: "none" }} />;
   if (tool && TOOL_PATHS[tool]) return <PathMark d={TOOL_PATHS[tool]!} label={ENGINE_NAMES[tool]} size={size} className={className} />;
   return <FridayMark size={size} className={className} />;
