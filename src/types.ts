@@ -208,7 +208,7 @@ export type SessionOptionsPatch = Partial<Omit<SessionOptions, "policy">> & { po
  * holds a key for these: the CLI runs on the host's machine, under their login,
  * and a small runner relays the session to it.
  */
-export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "goose" | "pi" | "acp";
+export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "goose" | "pi" | "aider" | "crush" | "auggie" | "acp";
 
 /** What a person sees about a coding tool before and after it is on their machine. Its runner side is in runner/adapters.ts. */
 export interface ToolInfo {
@@ -331,7 +331,34 @@ export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
     tint: "#71717a",
     note: "Runs on your Claude, ChatGPT or Copilot plan, or any provider's API key: sign in inside Pi with /login. On Windows it needs Git Bash.",
   },
-  // Any other agent in the ACP registry (Mistral Vibe, Auggie, Kimi...), by the command somebody sets on their computer.
+  // Aider, in plain text: one `aider --message` a turn (runner/adapters.ts aider). Its models come from a provider's API key.
+  aider: {
+    name: "Aider",
+    blurb: "AI pair programming in your terminal",
+    docs: "https://aider.chat/docs/",
+    install: { windows: 'powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 | iex"', unix: "curl -LsSf https://aider.chat/install.sh | sh" },
+    tint: "#14b014",
+    note: "Runs in Auto or Plan: it doesn't ask before each change. Set a provider's API key (Anthropic, OpenAI and others) where it runs.",
+  },
+  // Charm's coding agent, in plain text: one `crush run` a turn (runner/adapters.ts crush).
+  crush: {
+    name: "Crush",
+    blurb: "Charm's coding agent",
+    docs: "https://github.com/charmbracelet/crush",
+    install: { npm: "@charmland/crush" },
+    tint: "#6b50ff",
+    note: "Runs only in Auto: a run approves its own tool calls.",
+  },
+  // Augment Code's coding agent, over its ACP server (`auggie --acp`).
+  auggie: {
+    name: "Auggie",
+    blurb: "Augment Code's coding agent",
+    docs: "https://docs.augmentcode.com/cli/overview",
+    install: { npm: "@augmentcode/auggie" },
+    tint: "#8f8f9a",
+    note: "Sign in with `auggie auth login`: it opens the browser for your Augment account.",
+  },
+  // Any other agent in the ACP registry (Mistral Vibe, Kimi...), by the command somebody sets on their computer.
   acp: {
     name: "Other ACP agent",
     blurb: "Any coding agent that speaks ACP",
@@ -548,6 +575,11 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
   goose: [],
   // Pi lists the models of every provider it is signed in to, read from its first turn.
   pi: [],
+  // Aider and Crush take any model their provider has, typed by name: no fixed list.
+  aider: [],
+  crush: [],
+  // Auggie's models depend on the Augment account; its picker over ACP lists them.
+  auggie: [],
   acp: [],
 };
 

@@ -14,6 +14,6 @@ test("ready ones first, then those not signed in, then the rest, A to Z within e
   assert.deepEqual([...here].sort(order), ["antigravity", "claude", "codex", "copilot", "cursor", "muse"]);
   const rest = [...away].sort(order);
   assert.equal(rest.at(-1), "acp", "Other ACP agent last");
-  assert.deepEqual(rest.slice(0, 3), ["amp", "cline", "devin"]);
+  assert.deepEqual(rest.slice(0, 3), ["aider", "amp", "auggie"]);
   assert.equal(rest.length + here.length, ENGINE_TOOLS.length);
 });

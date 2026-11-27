@@ -1,0 +1,49 @@
+pkgname=friday-bin
+_pkgname=friday
+pkgver=0.4.4
+pkgrel=1
+pkgdesc='One app for all your coding agents: Claude Code, Codex, Cursor and more, side by side, on your own computer'
+arch=('x86_64')
+url='https://github.com/splashxmoon/friday-code'
+license=('MIT')
+depends=('alsa-lib' 'gtk3' 'mesa' 'nss')
+optdepends=('libnotify: desktop notifications')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+options=('!strip' '!debug')
+source=("LICENSE-$pkgver::https://raw.githubusercontent.com/splashxmoon/friday-code/v$pkgver/LICENSE")
+source_x86_64=("Friday-$pkgver-x86_64.AppImage::$url/releases/download/v$pkgver/Friday-x86_64.AppImage")
+noextract=("Friday-$pkgver-$CARCH.AppImage")
+sha256sums=('a18343685dd04ccfd2369f3cc810de6ab52e6eaf6ee8192ff2287025f74ebd1d')
+sha256sums_x86_64=('36b1b947cbaae0a5e2bc929e95d5b85b9aa15292c1b9b4cc97bc362bf4a28155')
+
+prepare() {
+  chmod +x "Friday-$pkgver-$CARCH.AppImage"
+  rm -rf squashfs-root
+  # Extracting doesn't need FUSE.
+  "./Friday-$pkgver-$CARCH.AppImage" --appimage-extract > /dev/null
+  sed -i 's/^Exec=AppRun /Exec=friday /; s/^Icon=friday-work$/Icon=friday/; /^X-AppImage-Version=/d' \
+    squashfs-root/friday-work.desktop
+}
+
+package() {
+  cd squashfs-root
+
+  install -d "$pkgdir/opt/$_pkgname"
+  cp -a --no-preserve=ownership . "$pkgdir/opt/$_pkgname"
+  # The AppImage's launcher, desktop entry and icon, and the libraries it bundles for other distributions.
+  rm -r "$pkgdir/opt/$_pkgname"/{AppRun,.DirIcon,friday-work.desktop,friday-work.png,usr}
+  # The AppImage keeps some folders readable only by their owner.
+  chmod -R u+rwX,go+rX,go-w "$pkgdir/opt/$_pkgname"
+
+  # pacman updates the package, so the app doesn't try to update itself as if it were the AppImage.
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/$_pkgname" << EOF
+#!/bin/sh
+export FRIDAY_NO_UPDATE_CHECK="\${FRIDAY_NO_UPDATE_CHECK:-1}"
+exec /opt/$_pkgname/friday-work "\$@"
+EOF
+
+  install -Dm644 friday-work.desktop "$pkgdir/usr/share/applications/$_pkgname.desktop"
+  install -Dm644 usr/share/icons/hicolor/1024x1024/apps/friday-work.png "$pkgdir/usr/share/pixmaps/$_pkgname.png"
+  install -Dm644 "$srcdir/LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
