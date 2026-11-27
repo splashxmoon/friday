@@ -2254,6 +2254,20 @@ export const qwen: Adapter = acp({
   modeIds: { edits: "default", full: "default", plan: "plan" },
 });
 
+// Auggie signs in with `auggie auth login`, which opens the browser for the Augment account and keeps the
+// session in ~/.augment/session.json; an AUGMENT_API_TOKEN or AUGMENT_SESSION_AUTH stands in for it.
+// Its ACP server is `auggie --acp`. Like Copilot it updates itself, so the session sets
+// AUGMENT_DISABLE_AUTO_UPDATE to keep it from updating while Friday has it mid-turn.
+export const auggie: Adapter = acp({
+  tool: "auggie",
+  bins: ["auggie"],
+  login: ["auth", "login"],
+  logout: ["auth", "logout"],
+  status: anyOf([".augment/session.json"], ["AUGMENT_API_TOKEN", "AUGMENT_SESSION_AUTH"]),
+  args: () => ["--acp"],
+  env: () => ({ AUGMENT_DISABLE_AUTO_UPDATE: "1" }),
+});
+
 export const gemini: Adapter = acp({
   tool: "gemini",
   bins: ["gemini"],
@@ -3403,7 +3417,7 @@ export const crush: Adapter = {
   },
 };
 
-export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, pi, aider, crush, acp: custom };
+export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, pi, aider, crush, auggie, acp: custom };
 
 // ── finding the executables ──────────────────────────────────────────
 

@@ -208,7 +208,7 @@ export type SessionOptionsPatch = Partial<Omit<SessionOptions, "policy">> & { po
  * holds a key for these: the CLI runs on the host's machine, under their login,
  * and a small runner relays the session to it.
  */
-export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "pi" | "aider" | "crush" | "acp";
+export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "pi" | "aider" | "crush" | "auggie" | "acp";
 
 /** What a person sees about a coding tool before and after it is on their machine. Its runner side is in runner/adapters.ts. */
 export interface ToolInfo {
@@ -346,7 +346,16 @@ export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
     tint: "#6b50ff",
     note: "Runs only in Auto: a run approves its own tool calls.",
   },
-  // Any other agent in the ACP registry (goose, Mistral Vibe, Auggie, Kimi...), by the command somebody sets on their computer.
+  // Augment Code's coding agent, over its ACP server (`auggie --acp`).
+  auggie: {
+    name: "Auggie",
+    blurb: "Augment Code's coding agent",
+    docs: "https://docs.augmentcode.com/cli/overview",
+    install: { npm: "@augmentcode/auggie" },
+    tint: "#8f8f9a",
+    note: "Sign in with `auggie auth login`: it opens the browser for your Augment account.",
+  },
+  // Any other agent in the ACP registry (goose, Mistral Vibe, Kimi...), by the command somebody sets on their computer.
   acp: {
     name: "Other ACP agent",
     blurb: "Any coding agent that speaks ACP",
@@ -565,6 +574,8 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
   // Aider and Crush take any model their provider has, typed by name: no fixed list.
   aider: [],
   crush: [],
+  // Auggie's models depend on the Augment account; its picker over ACP lists them.
+  auggie: [],
   acp: [],
 };
 

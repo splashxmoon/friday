@@ -211,6 +211,8 @@ export function EngineMark({ tool, size = 15, className }: { tool: EngineTool | 
   // Neither has a mark in an open set: a pair (Aider is pair programming) and a heart (Crush), beside their names.
   if (tool === "aider") return <UsersIcon size={size} className={className} aria-label={ENGINE_NAMES.aider} style={{ flex: "none" }} />;
   if (tool === "crush") return <HeartIcon size={size} className={className} aria-label={ENGINE_NAMES.crush} style={{ flex: "none" }} />;
+  // Auggie has no mark in an open set: a generic agent mark beside its name says which tool it is.
+  if (tool === "auggie") return <BotIcon size={size} className={className} aria-label={ENGINE_NAMES.auggie} style={{ flex: "none" }} />;
   if (tool === "acp") return <BotIcon size={size} className={className} aria-label={ENGINE_NAMES.acp} style={{ flex: "none" }} />;
   if (tool && TOOL_PATHS[tool]) return <PathMark d={TOOL_PATHS[tool]!} label={ENGINE_NAMES[tool]} size={size} className={className} />;
   return <FridayMark size={size} className={className} />;
