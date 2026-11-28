@@ -287,8 +287,10 @@ export interface AcpKept {
 /**
  * `end`: what it says once its process has ended, given the exit code, for a tool whose turn ends with the process rather than
  * with a line of its own (plainText).
+ * `stderr`: reads what it writes there, for a tool that says something about the turn on it, and gives back the part that is
+ * still worth reporting as its own words if the turn fails.
  */
-export type Parser = ((line: string) => AdapterOut[]) & { cancel?: () => void; steer?: (text: string) => Promise<boolean>; end?: (code: number | null) => AdapterOut[] };
+export type Parser = ((line: string) => AdapterOut[]) & { cancel?: () => void; steer?: (text: string) => Promise<boolean>; end?: (code: number | null) => AdapterOut[]; stderr?: (chunk: string) => string };
 
 export interface Adapter {
   tool: EngineTool;
@@ -3398,13 +3400,19 @@ export const aider: Adapter = {
   },
 };
 
-/** Crush's conversation, as Friday keeps it: "its latest one in this folder", which `--continue` picks up. */
+/** A Crush conversation whose id wasn't read: "its latest one in this folder", which `--continue` picks up. */
 export const CRUSH_LAST = "crush-latest";
+
+/** The lines `--verbose` logs: a level, then the message, with a long value carried onto "│" lines. */
+const CRUSH_LOG = /^(?:(?:DEBU|INFO|WARN|ERRO)\b|\s+│)/;
+/** The one that names the conversation the run is in, new or carried on. */
+const CRUSH_SESSION = /^INFO (?:Created|Continuing) session for non-interactive run session_id=(\S+)/;
 
 /**
  * Crush (Charm's coding agent, `crush`), which speaks no ACP: one `crush run` a turn, the instruction on stdin and its answer
- * printed as plain text (`--quiet`, no spinner). A non-interactive run approves everything itself, so it runs only in Auto. It
- * prints no conversation id, so the next turn carries on its most recent conversation in this folder (`--continue`).
+ * printed as plain text (`--quiet`, no spinner). A non-interactive run approves everything itself, so it runs only in Auto. Its
+ * logs (`--verbose`, on stderr) name the conversation's id, which the next turn hands back (`--session`), so two Friday sessions
+ * in one folder keep their own. Without an id it carries on the most recent conversation in the folder (`--continue`).
  */
 export const crush: Adapter = {
   tool: "crush",
@@ -3415,13 +3423,30 @@ export const crush: Adapter = {
   args: (t) => [
     "run",
     "--quiet",
-    ...(t.resumeId && !t.ephemeral ? ["--continue"] : []),
+    ...(t.ephemeral ? [] : ["--verbose"]),
+    ...(!t.resumeId || t.ephemeral ? [] : t.resumeId === CRUSH_LAST || !offered(t, "--session") ? ["--continue"] : ["--session", t.resumeId]),
     ...(t.model ? ["--model", t.model] : []),
     ...(t.effort && offered(t, "--reasoning-effort") ? ["--reasoning-effort", lowMediumHigh(t.effort)] : []),
   ],
-  optional: ["--reasoning-effort"],
+  optional: ["--reasoning-effort", "--session"],
   stdin: (t) => notedPrompt(t),
-  parser: (t) => plainText(undefined, (ok) => (ok && !t?.ephemeral ? [{ kind: "session", id: CRUSH_LAST }] : [])),
+  parser(t) {
+    let id = CRUSH_LAST;
+    let partial = "";
+    const parse = plainText(undefined, (ok) => (ok && !t?.ephemeral ? [{ kind: "session", id }] : []));
+    parse.stderr = (chunk) => {
+      const lines = (partial + chunk).split("\n");
+      partial = lines.pop()!;
+      return lines
+        .filter((l) => {
+          id = CRUSH_SESSION.exec(l.trimEnd())?.[1] ?? id;
+          return !CRUSH_LOG.test(l);
+        })
+        .map((l) => `${l}\n`)
+        .join("");
+    };
+    return parse;
+  },
   explain(e) {
     if (/no providers? (?:configured|found)|not (?:logged|signed) in|unauthori[sz]ed|api key|401/i.test(e)) return "Crush has no model provider set up on the computer it runs on. Run `crush login` there (or set a provider's API key), then send the instruction again.";
     return e;

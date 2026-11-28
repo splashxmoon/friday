@@ -1886,7 +1886,7 @@ ${prompt}`;
       );
     };
     listen();
-    child.stderr!.on("data", (d: Buffer) => (stderr = (stderr + d.toString()).slice(-4000)));
+    child.stderr!.on("data", (d: Buffer) => (stderr = (stderr + (parse.stderr?.(d.toString()) ?? d.toString())).slice(-4000)));
     const lines = createInterface({ input: child.stdout! });
     lines.on("line", (line) => {
       heard.heard();
